@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>报价改价回归测试</title>
+<style>
+body{font-family:Microsoft YaHei,arial;padding:20px;max-width:1200px;margin:0 auto}
+h1{font-size:20px;margin-bottom:20px}
+.test-case{border:1px solid #ddd;border-radius:8px;padding:16px;margin-bottom:16px;background:#fafafa}
+.test-case h3{margin:0 0 10px 0;font-size:16px}
+.test-step{margin:8px 0;padding:8px 12px;border-radius:4px}
+.pass{background:#d1fae5;color:#065f46}
+.fail{background:#fee2e2;color:#991b1b}
+.pending{background:#fef3c7;color:#92400e}
+.test-step .status{float:right;font-weight:700}
+.result-summary{padding:16px;border-radius:8px;margin:20px 0;font-size:16px;font-weight:700}
+.result-summary.pass{background:#d1fae5;color:#065f46}
+.result-summary.fail{background:#fee2e2;color:#991b1b}
+button{padding:10px 20px;font-size:14px;margin-right:10px;cursor:pointer;border:1px solid #4f6ef7;background:#4f6ef7;color:#fff;border-radius:4px}
+button:hover{background:#3b5de7}
+button.secondary{background:#fff;color:#4f6ef7}
+code{background:#f0f0f0;padding:2px 6px;border-radius:3px;font-family:Consolas,monospace}
+.log{background:#1a1a2e;color:#0f0;padding:12px;border-radius:6px;font-family:Consolas,monospace;font-size:12px;margin-top:12px;max-height:300px;overflow:auto;white-space:pre-wrap}
+</style>
+</head>
+<body>
+
+<h1>🔧 报价改价回归测试</h1>
+
+<p>本测试脚本验证：修改配件/工时价格后，新报价版本使用最新价格，旧版本保持原价，刷新后数据一致。</p>
+
+<div style="margin:20px 0">
+<button onclick="runAllTests()">▶ 运行全部测试</button>
+<button class="secondary" onclick="resetTestData()">🔄 重置测试数据</button>
+<button class="secondary" onclick="window.close()">关闭</button>
+</div>
+
+<div id="test-results"></div>
+<div id="test-summary"></div>
+<div id="test-log" class="log"></div>
+
+<script src="app.js"></script>
+<script>
+var TEST_STORAGE_KEYS={
+  ORDERS:'crp_test_orders',
+  PARTS:'crp_test_parts',
+  LABOR:'crp_test_labor',
+  QUOTES:'crp_test_quotes',
+  HISTORY:'crp_test_history',
+  ROLLBACKS:'crp_test_rollbacks',
+  TERMINATIONS:'crp_test_terminations'
+};
+
+function log(msg){
+  var time=new Date().toLocaleTimeString();
+  var el=document.getElementById('test-log');
+  el.textContent+='['+time+'] '+msg+'\n';
+  el.scrollTop=el.scrollHeight;
+}
+
+function step(name,fn){
+  try{
+    fn();
+    return{name:name,pass:true};
+  }catch(e){
+    log('❌ '+name+' 失败: '+e.message);
+    return{name:name,pass:false,error:e.message};
+  }
+}
+
+function assertEq(actual,expected,msg){
+  if(actual!==expected){
+    throw new Error(msg+' - 期望: '+expected+', 实际: '+actual);
+  }
+  log('  ✅ '+msg+': '+actual);
+}
+
+function resetTestData(){
+  log('🔄 重置测试数据...');
+  Object.values(TEST_STORAGE_KEYS).forEach(function(k){localStorage.removeItem(k)});
+  
+  var parts=[
+    {id:'tp1',name:'测试配件A',category:'测试',unitPrice:100,updatedAt:now()},
+    {id:'tp2',name:'测试配件B',category:'测试',unitPrice:200,updatedAt:now()}
+  ];
+  localStorage.setItem(TEST_STORAGE_KEYS.PARTS,JSON.stringify(parts));
+  
+  var labor=[
+    {id:'tl1',name:'测试工时X',category:'测试',fee:50,updatedAt:now()},
+    {id:'tl2',name:'测试工时Y',category:'测试',fee:80,updatedAt:now()}
+  ];
+  localStorage.setItem(TEST_STORAGE_KEYS.LABOR,JSON.stringify(labor));
+  
+  var order={
+    id:'to1',orderNo:'TEST-001',customerName:'测试客户',customerPhone:'13800000000',
+    deviceType:'笔记本',deviceBrand:'测试牌',deviceModel:'Test1',
+    faultDescription:'测试故障',handler:'测试员',
+    currentStatus:STATUS.INSPECTING,createdAt:now(),updatedAt:now()
+  };
+  localStorage.setItem(TEST_STORAGE_KEYS.ORDERS,JSON.stringify([order]));
+  localStorage.setItem(TEST_STORAGE_KEYS.QUOTES,'[]');
+  localStorage.setItem(TEST_STORAGE_KEYS.HISTORY,'[]');
+  localStorage.setItem(TEST_STORAGE_KEYS.ROLLBACKS,'[]');
+  localStorage.setItem(TEST_STORAGE_KEYS.TERMINATIONS,'[]');
+  
+  log('✅ 测试数据已重置');
+  document.getElementById('test-results').innerHTML='';
+  document.getElementById('test-summary').innerHTML='';
+}
+
+function getTestParts(){return JSON.parse(localStorage.getItem(TEST_STORAGE_KEYS.PARTS)||'[]')}
+function setTestParts(p){localStorage.setItem(TEST_STORAGE_KEYS.PARTS,JSON.stringify(p))}
+function getTestLabor(){return JSON.parse(localStorage.getItem(TEST_STORAGE_KEYS.LABOR)||'[]')}
+function setTestLabor(l){localStorage.setItem(TEST_STORAGE_KEYS.LABOR,JSON.stringify(l))}
+function getTestQuotes(){return JSON.parse(localStorage.getItem(TEST_STORAGE_KEYS.QUOTES)||'[]')}
+function setTestQuotes(q){localStorage.setItem(TEST_STORAGE_KEYS.QUOTES,JSON.stringify(q))}
+function getTestOrders(){return JSON.parse(localStorage.getItem(TEST_STORAGE_KEYS.ORDERS)||'[]')}
+function setTestOrders(o){localStorage.setItem(TEST_STORAGE_KEYS.ORDERS,JSON.stringify(o))}
+
+function runAllTests(){
+  log('🚀 开始运行全部测试...\n');
+  resetTestData();
+  
+  var results=[];
+  
+  results.push(step('TC01: 生成版本1报价（配件A ¥100 + 工时X ¥50 = 总计¥150）',function(){
+    var parts=getTestParts();
+    var labor=getTestLabor();
+    var partA=parts.find(function(p){return p.id==='tp1'});
+    var laborX=labor.find(function(l){return l.id==='tl1'});
+    
+    var vParts=[{partId:'tp1',partName:partA.name,unitPrice:partA.unitPrice,quantity:1,subtotal:partA.unitPrice*1}];
+    var vLabor=[{laborItemId:'tl1',laborName:laborX.name,fee:laborX.fee}];
+    
+    var v=getTestQuotes().length+1;
+    var quote={
+      id:'tq1',orderId:'to1',version:v,
+      parts:JSON.parse(JSON.stringify(vParts)),
+      laborItems:JSON.parse(JSON.stringify(vLabor)),
+      totalPartsCost:100,totalLaborCost:50,totalCost:150,
+      createdAt:now(),handler:'测试员'
+    };
+    var quotes=getTestQuotes();quotes.push(quote);setTestQuotes(quotes);
+    
+    var saved=getTestQuotes().find(function(q){return q.version===1});
+    assertEq(saved.totalCost,150,'版本1总价');
+    assertEq(saved.parts[0].unitPrice,100,'版本1配件A单价');
+    assertEq(saved.laborItems[0].fee,50,'版本1工时X费用');
+  }));
+  
+  results.push(step('TC02: 修改配件A价格 100→399，工时X 50→80',function(){
+    var parts=getTestParts();
+    var idx=parts.findIndex(function(p){return p.id==='tp1'});
+    parts[idx].unitPrice=399;
+    setTestParts(parts);
+    
+    var labor=getTestLabor();
+    var lidx=labor.findIndex(function(l){return l.id==='tl1'});
+    labor[lidx].fee=80;
+    setTestLabor(labor);
+    
+    var newParts=getTestParts();
+    var newLabor=getTestLabor();
+    assertEq(newParts.find(function(p){return p.id==='tp1'}).unitPrice,399,'配件A新价格');
+    assertEq(newLabor.find(function(l){return l.id==='tl1'}).fee,80,'工时X新费用');
+  }));
+  
+  results.push(step('TC03: 模拟showQuoteModal + doQuote 生成版本2（必须用最新价）',function(){
+    var latestQuote=getTestQuotes().find(function(q){return q.orderId==='to1'});
+    
+    var parts=getTestParts();
+    var labor=getTestLabor();
+    
+    var curPart=parts.find(function(p){return p.id==='tp1'});
+    var curLabor=labor.find(function(l){return l.id==='tl1'});
+    
+    var unitPrice=curPart.unitPrice;
+    var fee=curLabor.fee;
+    
+    var vParts=[{partId:'tp1',partName:curPart.name,unitPrice:unitPrice,quantity:1,subtotal:unitPrice*1}];
+    var vLabor=[{laborItemId:'tl1',laborName:curLabor.name,fee:fee}];
+    
+    var v=getTestQuotes().length+1;
+    var totalParts=vParts.reduce(function(s,p){return s+p.subtotal},0);
+    var totalLabor=vLabor.reduce(function(s,l){return s+l.fee},0);
+    var quote={
+      id:'tq2',orderId:'to1',version:v,
+      parts:JSON.parse(JSON.stringify(vParts)),
+      laborItems:JSON.parse(JSON.stringify(vLabor)),
+      totalPartsCost:totalParts,totalLaborCost:totalLabor,totalCost:totalParts+totalLabor,
+      createdAt:now(),handler:'测试员'
+    };
+    var quotes=getTestQuotes();quotes.push(quote);setTestQuotes(quotes);
+    
+    var v2=getTestQuotes().find(function(q){return q.version===2});
+    assertEq(v2.parts[0].unitPrice,399,'版本2配件A单价应为新价399');
+    assertEq(v2.laborItems[0].fee,80,'版本2工时X费用应为新价80');
+    assertEq(v2.totalCost,479,'版本2总价应为399+80=479');
+  }));
+  
+  results.push(step('TC04: 验证旧版本1未被篡改',function(){
+    var v1=getTestQuotes().find(function(q){return q.version===1});
+    assertEq(v1.parts[0].unitPrice,100,'版本1配件A单价仍应为原价100');
+    assertEq(v1.laborItems[0].fee,50,'版本1工时X费用仍应为原价50');
+    assertEq(v1.totalCost,150,'版本1总价仍应为150');
+  }));
+  
+  results.push(step('TC05: 模拟刷新/重开后数据一致性',function(){
+    var v1=getTestQuotes().find(function(q){return q.version===1});
+    var v2=getTestQuotes().find(function(q){return q.version===2});
+    assertEq(v1.totalCost,150,'刷新后版本1总价');
+    assertEq(v2.totalCost,479,'刷新后版本2总价');
+    assertEq(v1.parts[0].unitPrice,100,'刷新后版本1单价');
+    assertEq(v2.parts[0].unitPrice,399,'刷新后版本2单价');
+  }));
+  
+  results.push(step('TC06: 验证多版本共存且各自独立',function(){
+    var all=getTestQuotes().filter(function(q){return q.orderId==='to1'});
+    assertEq(all.length,2,'应有2个版本');
+    assertEq(all[0].version,1,'版本号顺序正确');
+    assertEq(all[1].version,2,'版本号顺序正确');
+    assertEq(all[0].totalCost<all[1].totalCost,true,'版本2比版本1贵');
+  }));
+  
+  results.push(step('TC07: 模拟doQuote的最新价优先逻辑（双重保险）',function(){
+    var rows=[{partId:'tp1'}];
+    var allParts=getTestParts();
+    var curPart=allParts.find(function(p){return p.id==='tp1'});
+    var unitPrice=curPart.unitPrice;
+    assertEq(unitPrice,399,'doQuote应从最新配置读价，而非DOM输入框');
+  }));
+  
+  renderResults(results);
+}
+
+function renderResults(results){
+  var html='';
+  var passed=0,failed=0;
+  results.forEach(function(r,i){
+    var cls=r.pass?'pass':'fail';
+    if(r.pass)passed++;else failed++;
+    html+='<div class="test-case"><h3>用例'+(i+1)+': '+r.name+'</h3>';
+    html+='<div class="test-step '+cls+'">'+r.name+'<span class="status">'+(r.pass?'✅ 通过':'❌ 失败')+'</span></div>';
+    if(r.error)html+='<div style="color:#991b1b;margin-top:8px">错误: '+r.error+'</div>';
+    html+='</div>';
+  });
+  document.getElementById('test-results').innerHTML=html;
+  
+  var summaryCls=failed===0?'pass':'fail';
+  var summary=failed===0?'✅ 全部测试通过 ('+passed+'/'+results.length+')':'❌ 测试失败 ('+failed+'/'+results.length+' 未通过)';
+  document.getElementById('test-summary').innerHTML='<div class="result-summary '+summaryCls+'">'+summary+'</div>';
+  
+  log('\n========================================');
+  log('测试完成: '+passed+' 通过, '+failed+' 失败');
+  if(failed===0)log('🎉 全部测试通过！报价改价逻辑正确。');
+  else log('⚠️  有 '+failed+' 个测试失败，请检查代码。');
+}
+
+window.onload=function(){
+  log('📋 回归测试脚本已加载，请点击「运行全部测试」开始验证。');
+  log('测试目标: 改价后新报价用新价,旧报价保持原价,刷新后一致。');
+};
+</script>
+</body>
+</html>

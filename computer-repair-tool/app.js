@@ -687,9 +687,13 @@ function showQuoteModal(orderId){
 
   if(latestQuote){
     var pSel=document.querySelectorAll('.q-part-select');
-    latestQuote.parts.forEach(function(p,i){if(pSel[i])pSel[i].value=p.partId});
+    latestQuote.parts.forEach(function(p,i){
+      if(pSel[i]){pSel[i].value=p.partId;window.AppQuotePartChange(pSel[i])}
+    });
     var lSel=document.querySelectorAll('.q-labor-select');
-    latestQuote.laborItems.forEach(function(l,i){if(lSel[i])lSel[i].value=l.laborItemId});
+    latestQuote.laborItems.forEach(function(l,i){
+      if(lSel[i]){lSel[i].value=l.laborItemId;window.AppQuoteLaborChange(lSel[i])}
+    });
   }
   recalcQuoteTotal();
 }
@@ -748,18 +752,22 @@ function recalcQuoteTotal(){
 function doQuote(orderId){
   var handler=document.getElementById('m-quote-handler').value.trim();
   var parts=[];var laborItems=[];
+  var allParts=Store.getParts();
+  var allLabor=Store.getLabor();
   document.querySelectorAll('.quote-item-row').forEach(function(row){
     var sel=row.querySelector('.q-part-select');var partId=sel.value;if(!partId)return;
     var partName=sel.options[sel.selectedIndex].getAttribute('data-name');
-    var unitPrice=parseFloat(row.querySelector('.q-part-price').value)||0;
+    var curPart=allParts.find(function(p){return p.id===partId});
+    var unitPrice=curPart?curPart.unitPrice:(parseFloat(row.querySelector('.q-part-price').value)||0);
     var quantity=parseInt(row.querySelector('.q-part-qty').value)||0;
-    var subtotal=parseFloat(row.querySelector('.q-part-subtotal').value)||0;
+    var subtotal=unitPrice*quantity;
     parts.push({partId:partId,partName:partName,unitPrice:unitPrice,quantity:quantity,subtotal:subtotal});
   });
   document.querySelectorAll('.labor-item-row').forEach(function(row){
     var sel=row.querySelector('.q-labor-select');var laborItemId=sel.value;if(!laborItemId)return;
     var laborName=sel.options[sel.selectedIndex].getAttribute('data-name');
-    var fee=parseFloat(row.querySelector('.q-labor-fee').value)||0;
+    var curLabor=allLabor.find(function(l){return l.id===laborItemId});
+    var fee=curLabor?curLabor.fee:(parseFloat(row.querySelector('.q-labor-fee').value)||0);
     laborItems.push({laborItemId:laborItemId,laborName:laborName,fee:fee});
   });
   if(!parts.length&&!laborItems.length){showToast('请至少添加一项配件或工时','error');return}
