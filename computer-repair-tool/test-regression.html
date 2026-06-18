@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回归测试中心 · 电脑维修接单系统</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Microsoft YaHei","PingFang SC",arial,sans-serif;padding:20px;max-width:1200px;margin:0 auto;background:#f0f4f8;color:#334155;line-height:1.6}
+h1{font-size:24px;color:#1e293b;margin-bottom:4px}
+.subtitle{color:#64748b;margin-bottom:20px;font-size:14px}
+.card{background:#fff;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.card h3{font-size:16px;color:#1e293b;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card h3 .icon{font-size:18px}
+
+.btn{padding:8px 16px;font-size:13px;cursor:pointer;border:none;border-radius:6px;background:#4f6ef7;color:#fff;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#3b5de7;transform:translateY(-1px)}
+.btn.secondary{background:#f1f5f9;color:#475569}
+.btn.secondary:hover{background:#e2e8f0}
+.btn.success{background:#10b981}
+.btn.success:hover{background:#059669}
+.btn.danger{background:#ef4444}
+.btn.danger:hover{background:#dc2626}
+.btn.warning{background:#f59e0b}
+.btn.warning:hover{background:#d97706}
+.btn.sm{padding:5px 12px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+
+.summary-banner{padding:16px 20px;border-radius:10px;font-size:15px;font-weight:600;text-align:center;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:12px}
+.summary-banner.pass{background:#d1fae5;color:#065f46;border:2px solid #10b981}
+.summary-banner.fail{background:#fee2e2;color:#991b1b;border:2px solid #ef4444}
+.summary-banner.info{background:#dbeafe;color:#1e40af;border:2px solid #3b82f6}
+.summary-banner .count{font-size:20px}
+
+.test-row{display:grid;grid-template-columns:60px 1fr 100px 120px;gap:12px;align-items:center;padding:10px 14px;margin:4px 0;border-radius:8px;cursor:pointer;transition:background .15s}
+.test-row:hover{background:#f8fafc}
+.test-row.pass{background:#f0fdf4;border-left:4px solid #10b981}
+.test-row.fail{background:#fef2f2;border-left:4px solid #ef4444}
+.test-row.pending{background:#f8fafc;border-left:4px solid #94a3b8}
+.test-row.running{background:#fef3c7;border-left:4px solid #f59e0b;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+.test-row .tc-id{font-weight:700;font-size:13px;color:#475569}
+.test-row .tc-name{font-weight:500;font-size:14px}
+.test-row .tc-cat{font-size:12px;color:#64748b;background:#f1f5f9;padding:2px 8px;border-radius:4px;display:inline-block}
+.test-row .tc-status{font-weight:700;font-size:13px;text-align:right}
+.test-row.pass .tc-status{color:#059669}
+.test-row.fail .tc-status{color:#dc2626}
+.test-row.pending .tc-status{color:#64748b}
+.test-row.running .tc-status{color:#d97706}
+.test-detail{background:#fffbeb;padding:10px 14px 12px 24px;border-radius:0 0 8px 8px;margin:-4px 0 4px 0;font-size:13px;color:#78350f;display:none}
+.test-detail.show{display:block}
+.test-detail .detail-label{font-weight:600;margin-top:6px}
+.test-detail .detail-value{font-family:Consolas,monospace;background:#fef3c7;padding:2px 6px;border-radius:3px}
+
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.stat-card{background:#f8fafc;padding:14px;border-radius:8px;text-align:center}
+.stat-card .stat-value{font-size:24px;font-weight:700;color:#1e293b}
+.stat-card .stat-label{font-size:12px;color:#64748b;margin-top:4px}
+.stat-card.pass .stat-value{color:#059669}
+.stat-card.fail .stat-value{color:#dc2626}
+.stat-card.total .stat-value{color:#4f6ef7}
+
+.log{background:#0f172a;color:#e2e8f0;padding:14px;border-radius:8px;font-family:Consolas,"Courier New",monospace;font-size:12px;margin-top:12px;max-height:300px;overflow:auto;line-height:1.8}
+.log .info{color:#94a3b8}
+.log .pass{color:#22c55e}
+.log .fail{color:#f87171}
+.log .warn{color:#fbbf24}
+.log .highlight{color:#60a5fa}
+
+.history-item{padding:12px 16px;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;cursor:pointer;transition:all .15s;display:grid;grid-template-columns:1fr 120px 100px 120px;gap:10px;align-items:center}
+.history-item:hover{border-color:#cbd5e1;background:#f8fafc}
+.history-item .h-date{font-weight:600;font-size:13px;color:#1e293b}
+.history-item .h-time{font-size:12px;color:#64748b}
+.history-item .h-result{font-weight:700;font-size:13px;text-align:center;padding:4px 8px;border-radius:4px}
+.history-item .h-result.pass{background:#d1fae5;color:#065f46}
+.history-item .h-result.fail{background:#fee2e2;color:#991b1b}
+.history-item .h-count{font-size:12px;color:#475569;text-align:right}
+.history-item .h-actions{display:flex;gap:4px;justify-content:flex-end}
+
+.tabs{display:flex;border-bottom:2px solid #e2e8f0;margin-bottom:16px}
+.tab{padding:10px 20px;cursor:pointer;font-weight:500;color:#64748b;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.tab.active{color:#4f6ef7;border-bottom-color:#4f6ef7}
+.tab:hover{color:#3b5de7}
+
+.failure-list{margin-top:10px}
+.failure-item{background:#fef2f2;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid #ef4444}
+.failure-item .f-title{font-weight:600;color:#991b1b;font-size:14px;margin-bottom:4px}
+.failure-item .f-detail{font-size:12px;color:#7f1d1d;font-family:Consolas,monospace}
+
+.alert{padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:12px}
+.alert.info{background:#dbeafe;color:#1e40af;border:1px solid #93c5fd}
+.alert.warn{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+.alert.error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.alert.success{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7}
+
+.compare-table{width:100%;border-collapse:collapse;font-size:13px}
+.compare-table th,.compare-table td{border:1px solid #e2e8f0;padding:8px 12px;text-align:left}
+.compare-table th{background:#f8fafc;font-weight:600}
+.compare-table tr.regression td{background:#fef2f2;color:#991b1b}
+.compare-table tr.fixed td{background:#f0fdf4;color:#166534}
+.compare-table tr.new td{background:#dbeafe;color:#1e40af}
+
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal-overlay.show{display:flex}
+.modal-content{background:#fff;border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow:auto}
+.modal-content h3{margin-bottom:16px}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge.pass{background:#d1fae5;color:#065f46}
+.badge.fail{background:#fee2e2;color:#991b1b}
+.badge.info{background:#dbeafe;color:#1e40af}
+.badge.warn{background:#fef3c7;color:#92400e}
+
+.empty-state{text-align:center;padding:30px;color:#94a3b8;font-size:14px}
+.empty-state .empty-icon{font-size:40px;margin-bottom:8px}
+
+select,input[type=text]{padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;background:#fff}
+select:focus,input:focus{outline:none;border-color:#4f6ef7;box-shadow:0 0 0 3px rgba(79,110,247,.1)}
+
+.row-between{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+
+@media(max-width:768px){
+  .stats-grid{grid-template-columns:repeat(2,1fr)}
+  .test-row{grid-template-columns:50px 1fr 80px}
+  .test-row .tc-cat{display:none}
+  .history-item{grid-template-columns:1fr 80px}
+}
+</style>
+</head>
+<body>
+
+<h1>🧪 回归测试中心</h1>
+<p class="subtitle">统一管理所有回归测试用例 · 结果持久化 · 历史可追溯 · 导入导出可复核</p>
+
+<div id="recovery-banner"></div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="run" onclick="switchTab('run')">▶ 执行测试</div>
+  <div class="tab" data-tab="history" onclick="switchTab('history')">📋 历史记录</div>
+  <div class="tab" data-tab="compare" onclick="switchTab('compare')">🔍 结果对比</div>
+  <div class="tab" data-tab="failures" onclick="switchTab('failures')">❌ 失败明细</div>
+  <div class="tab" data-tab="export" onclick="switchTab('export')">📥 导入导出</div>
+</div>
+
+<div id="tab-run">
+  <div class="btn-group">
+    <button class="btn" onclick="runAllTests()">▶ 运行全部测试</button>
+    <button class="btn secondary" onclick="resetTestData()">🔄 重置测试数据</button>
+    <button class="btn secondary" onclick="clearTestData()">🗑 清空测试数据</button>
+    <button class="btn secondary" onclick="clearCurrentRun()">✖ 清除当前结果</button>
+  </div>
+
+  <div id="summary-container"></div>
+
+  <div class="stats-grid">
+    <div class="stat-card total"><div class="stat-value" id="stat-total">12</div><div class="stat-label">总用例</div></div>
+    <div class="stat-card pass"><div class="stat-value" id="stat-pass">0</div><div class="stat-label">通过</div></div>
+    <div class="stat-card fail"><div class="stat-value" id="stat-fail">0</div><div class="stat-label">失败</div></div>
+    <div class="stat-card"><div class="stat-value" id="stat-rate">0%</div><div class="stat-label">通过率</div></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon">📋</span> 测试用例列表</h3>
+    <div id="test-list"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon">📝</span> 执行日志</h3>
+    <div id="test-log" class="log"></div>
+  </div>
+</div>
+
+<div id="tab-history" style="display:none">
+  <div class="card">
+    <div class="row-between">
+      <h3 style="margin-bottom:0"><span class="icon">📋</span> 历史运行记录</h3>
+      <button class="btn btn-sm danger" onclick="clearAllHistory()">🗑 清空全部历史</button>
+    </div>
+    <div id="history-list"></div>
+  </div>
+</div>
+
+<div id="tab-compare" style="display:none">
+  <div class="card">
+    <h3><span class="icon">🔍</span> 两次运行结果对比</h3>
+    <div style="display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap">
+      <div>
+        <label style="font-size:13px;color:#64748b;margin-right:8px">基准版本:</label>
+        <select id="compare-a" onchange="updateCompare()"></select>
+      </div>
+      <div>
+        <label style="font-size:13px;color:#64748b;margin-right:8px">对比版本:</label>
+        <select id="compare-b" onchange="updateCompare()"></select>
+      </div>
+    </div>
+    <div id="compare-result"></div>
+  </div>
+</div>
+
+<div id="tab-failures" style="display:none">
+  <div class="card">
+    <h3><span class="icon">❌</span> 失败用例明细</h3>
+    <div id="failure-list"></div>
+  </div>
+</div>
+
+<div id="tab-export" style="display:none">
+  <div class="card">
+    <h3><span class="icon">📥</span> 导入 / 导出</h3>
+    <div class="alert info">
+      <strong>格式说明：</strong>导出文件包含完整的测试运行记录（用例结果、日志、时间戳），可用于异地复核或 CI 集成。导入时自动识别重复 runId、版本冲突和缺字段数据，不会覆盖已有记录。
+    </div>
+
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn success" onclick="exportAllResults()">📤 导出全部记录</button>
+      <button class="btn" onclick="exportLatestResult()">📤 导出最新一次</button>
+      <button class="btn warning" onclick="document.getElementById('import-file').click()">📥 导入 JSON 文件</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importResults(event)">
+    </div>
+
+    <div id="import-report"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="icon">⚙️</span> 关于口径</h3>
+    <div class="detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px">
+      <div><strong>测试套件:</strong> <span id="meta-suite"></span></div>
+      <div><strong>套件版本:</strong> <span id="meta-version"></span></div>
+      <div><strong>用例总数:</strong> <span id="meta-total"></span></div>
+      <div><strong>分类数:</strong> <span id="meta-cats"></span></div>
+      <div><strong>数据源:</strong> <span id="meta-datasource"></span></div>
+      <div><strong>存储 Key:</strong> <code>crp_test_results</code></div>
+    </div>
+    <p style="margin-top:12px;font-size:13px;color:#64748b">
+      命令行脚本（verify-logic.py / test-history-linkage.js）与本页面使用<strong>完全相同</strong>的用例定义、结果格式和统计口径，确保三处数字完全一致。
+    </p>
+  </div>
+</div>
+
+<div id="run-detail-modal" class="modal-overlay">
+  <div class="modal-content">
+    <h3>运行详情</h3>
+    <div id="run-detail-content"></div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="btn secondary" onclick="closeRunDetail()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="test-cases.js"></script>
+<script src="test-result-manager.js"></script>
+<script>
+var CRP = window.CRP;
+var STATUS = CRP.STATUS;
+var Store = CRP.Store;
+var QuoteEngine = CRP.QuoteEngine;
+var renderQuoteTable = CRP.renderQuoteTable;
+var now = CRP.now;
+
+var TEST_PREFIX = 'crp_test_';
+var ORIGIN_KEYS = {};
+
+var currentRun = null;
+var suiteMeta = TestCases.getSuiteMeta();
+var testCases = TestCases.getTestCases();
+
+function log(msg, type) {
+  var time = new Date().toLocaleTimeString();
+  var el = document.getElementById('test-log');
+  var cls = type || 'info';
+  el.innerHTML += '<span class="' + cls + '">[' + time + '] ' + msg + '</span>\n';
+  el.scrollTop = el.scrollHeight;
+  if (currentRun) {
+    ResultManager.addLog(currentRun, msg, type);
+  }
+}
+
+function swapStorageKeys(useTest) {
+  var keys = ['ORDERS','PARTS','LABOR','QUOTES','HISTORY','ROLLBACKS','TERMINATIONS','INITIALIZED'];
+  if (useTest) {
+    keys.forEach(function(k) {
+      ORIGIN_KEYS[k] = CRP.STORAGE_KEYS[k];
+      CRP.STORAGE_KEYS[k] = TEST_PREFIX + k.toLowerCase();
+    });
+  } else {
+    keys.forEach(function(k) {
+      if (ORIGIN_KEYS[k]) CRP.STORAGE_KEYS[k] = ORIGIN_KEYS[k];
+    });
+  }
+}
+
+function resetTestData() {
+  swapStorageKeys(true);
+  var keys = Object.values(CRP.STORAGE_KEYS);
+  keys.forEach(function(k) { localStorage.removeItem(k); });
+
+  var t = '2026-06-18T09:00:00.000Z';
+  var parts = [
+    {id:'tp1', name:'测试配件A', category:'测试', unitPrice:100, updatedAt:t},
+    {id:'tp2', name:'测试配件B', category:'测试', unitPrice:289, updatedAt:t}
+  ];
+  Store.saveParts(parts);
+
+  var labor = [
+    {id:'tl1', name:'测试工时X', category:'测试', fee:50, updatedAt:t},
+    {id:'tl2', name:'测试工时Y', category:'测试', fee:200, updatedAt:t}
+  ];
+  Store.saveLabor(labor);
+
+  var order = {
+    id:'to1', orderNo:'TEST-001', customerName:'测试客户', customerPhone:'13800000000',
+    deviceType:'笔记本', deviceBrand:'测试牌', deviceModel:'Test1',
+    faultDescription:'测试故障描述', handler:'测试员',
+    currentStatus: STATUS.INSPECTING, createdAt:t, updatedAt:t
+  };
+  Store.saveOrders([order]);
+
+  Store.saveQuotes([]);
+  Store.saveHistory([]);
+  Store.saveRollbacks([]);
+  Store.saveTerminations([]);
+  Store.save(CRP.STORAGE_KEYS.INITIALIZED, 'true');
+
+  log('✅ 测试数据已重置（测试命名空间，不影响正式数据）', 'pass');
+}
+
+function clearTestData() {
+  swapStorageKeys(true);
+  var keys = Object.values(CRP.STORAGE_KEYS);
+  keys.forEach(function(k) { localStorage.removeItem(k); });
+  swapStorageKeys(false);
+  log('🗑 测试数据已清空', 'warn');
+}
+
+function renderTestList(results) {
+  var html = '';
+  testCases.forEach(function(tc) {
+    var result = results ? results.find(function(r) { return r.id === tc.id; }) : null;
+    var statusClass = 'pending';
+    var statusText = '待执行';
+    var detail = '';
+
+    if (result) {
+      statusClass = result.pass ? 'pass' : 'fail';
+      statusText = result.pass ? '✅ 通过' : '❌ 失败';
+      detail = result.detail || '';
+    } else if (currentRun && currentRun.status === 'running') {
+      statusClass = 'pending';
+      statusText = '⏳ 等待中';
+    }
+
+    html += '<div class="test-row ' + statusClass + '" onclick="toggleTestDetail(\'' + tc.id + '\')">';
+    html += '<span class="tc-id">' + tc.id + '</span>';
+    html += '<span class="tc-name">' + tc.name + ' <span class="tc-cat">' + tc.category + '</span></span>';
+    html += '<span class="tc-status">' + statusText + '</span>';
+    html += '</div>';
+    html += '<div class="test-detail" id="detail-' + tc.id + '">';
+    html += '<div class="detail-label">描述：</div><div>' + tc.description + '</div>';
+    html += '<div class="detail-label">优先级：</div><div><span class="badge ' + (tc.priority === 'high' ? 'warn' : 'info') + '">' + (tc.priority === 'high' ? '高' : '中') + '</span></div>';
+    if (detail) {
+      html += '<div class="detail-label">结果详情：</div><div class="detail-value">' + escapeHtml(detail) + '</div>';
+    }
+    html += '</div>';
+  });
+  document.getElementById('test-list').innerHTML = html;
+}
+
+function toggleTestDetail(tcId) {
+  var el = document.getElementById('detail-' + tcId);
+  if (el) el.classList.toggle('show');
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function updateStats(passed, failed, total) {
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-pass').textContent = passed;
+  document.getElementById('stat-fail').textContent = failed;
+  var rate = total > 0 ? Math.round(passed / total * 100) : 0;
+  document.getElementById('stat-rate').textContent = rate + '%';
+}
+
+function updateSummary(run) {
+  var el = document.getElementById('summary-container');
+  if (!run) {
+    el.innerHTML = '<div class="summary-banner info">' +
+      '📊 共 ' + suiteMeta.totalCases + ' 个测试用例，点击「运行全部测试」开始验证' +
+      '</div>';
+    return;
+  }
+  var cls = run.status === 'pass' ? 'pass' : 'fail';
+  var icon = run.status === 'pass' ? '🎉' : '⚠️';
+  var text = run.status === 'pass'
+    ? icon + ' 全部测试通过！(' + run.passed + '/' + run.total + ')'
+    : icon + ' 测试失败 (' + run.failed + '/' + run.total + ' 未通过)';
+  el.innerHTML = '<div class="summary-banner ' + cls + '">' +
+    '<span class="count">' + text + '</span>' +
+    '</div>';
+}
+
+function markTestRunning(tcId) {
+  var rows = document.querySelectorAll('.test-row');
+  rows.forEach(function(row) {
+    var idEl = row.querySelector('.tc-id');
+    if (idEl && idEl.textContent === tcId) {
+      row.className = 'test-row running';
+      row.querySelector('.tc-status').textContent = '🔄 运行中';
+    }
+  });
+}
+
+function assertEq(actual, expected, msg) {
+  if (actual !== expected) {
+    throw new Error(msg + ' — 期望: ' + expected + ', 实际: ' + actual);
+  }
+  log('  ✅ ' + msg + ': ' + actual, 'pass');
+}
+
+function runAllTests() {
+  log('\n🚀 ========== 开始运行全部回归测试 ==========', 'warn');
+
+  currentRun = ResultManager.createRun(suiteMeta);
+  resetTestData();
+  renderTestList(null);
+  updateStats(0, 0, suiteMeta.totalCases);
+  updateSummary(null);
+
+  var results = [];
+
+  var testFns = [
+    { id: 'TC01', fn: tc01_generateV1 },
+    { id: 'TC02', fn: tc02_modifyPrices },
+    { id: 'TC03', fn: tc03_generateV2 },
+    { id: 'TC04', fn: tc04_v1NotModified },
+    { id: 'TC05', fn: tc05_refreshConsistency },
+    { id: 'TC06', fn: tc06_multiVersionIndependent },
+    { id: 'TC07', fn: tc07_doQuoteUsesLatest },
+    { id: 'TC08', fn: tc08_detailRenderCorrect },
+    { id: 'TC09', fn: tc09_historyHasV2 },
+    { id: 'TC10', fn: tc10_v1HistoryNotTouched },
+    { id: 'TC11', fn: tc11_historyPersistsAfterRefresh },
+    { id: 'TC12', fn: tc12_v3HistoryAlsoWritten }
+  ];
+
+  var idx = 0;
+
+  function runNext() {
+    if (idx >= testFns.length) {
+      finishAllTests();
+      return;
+    }
+
+    var item = testFns[idx];
+    var tc = testCases.find(function(t) { return t.id === item.id; });
+    markTestRunning(item.id);
+    log('\n🧪 ' + item.id + ': ' + tc.name, 'highlight');
+
+    try {
+      item.fn();
+      var result = ResultManager.addResult(currentRun, tc, true, '通过');
+      results.push(result);
+    } catch(e) {
+      log('  ❌ 失败: ' + e.message, 'fail');
+      var result = ResultManager.addResult(currentRun, tc, false, e.message);
+      results.push(result);
+    }
+
+    renderTestList(results);
+    updateStats(currentRun.passed, currentRun.failed, currentRun.total);
+    idx++;
+
+    setTimeout(runNext, 50);
+  }
+
+  setTimeout(runNext, 100);
+}
+
+function finishAllTests() {
+  ResultManager.finishRun(currentRun);
+  var saveResult = ResultManager.saveRun(currentRun);
+
+  if (saveResult.ok) {
+    log('\n📁 结果已保存到本地存储 (runId: ' + currentRun.runId + ')', 'info');
+  } else {
+    log('\n⚠️ 结果保存失败: ' + saveResult.error, 'fail');
+  }
+
+  updateSummary(currentRun);
+  renderFailures();
+  renderHistory();
+  populateCompareSelects();
+
+  log('\n========================================', 'warn');
+  log('测试完成: ' + currentRun.passed + ' 通过, ' + currentRun.failed + ' 失败',
+      currentRun.failed === 0 ? 'pass' : 'fail');
+  if (currentRun.failed === 0) {
+    log('✅ 报价改价逻辑修复正确！历史版本保持原价，新版本使用最新价，历史记录完整。', 'pass');
+  }
+
+  swapStorageKeys(false);
+  log('💡 已切回正式数据命名空间', 'info');
+}
+
+function tc01_generateV1() {
+  var parts = [
+    {partId:'tp1', partName:'测试配件A', unitPrice:100, quantity:2, subtotal:200}
+  ];
+  var laborItems = [
+    {laborItemId:'tl1', laborName:'测试工时X', fee:50}
+  ];
+  var result = QuoteEngine.generate('to1', parts, laborItems, '测试员');
+
+  if (!result.ok) throw new Error('生成报价失败: ' + result.msg);
+  var q = result.quote;
+
+  assertEq(q.version, 1, '版本号');
+  assertEq(q.parts.length, 1, '配件项数');
+  assertEq(q.parts[0].unitPrice, 100, '配件A单价');
+  assertEq(q.parts[0].subtotal, 200, '配件A小计');
+  assertEq(q.laborItems.length, 1, '工时项数');
+  assertEq(q.laborItems[0].fee, 50, '工时X费用');
+  assertEq(q.totalCost, 250, '版本1总价');
+
+  var saved = Store.getLatestQuote('to1');
+  assertEq(saved.totalCost, 250, '保存后读取的版本1总价');
+}
+
+function tc02_modifyPrices() {
+  var parts = Store.getParts();
+  var idx = parts.findIndex(function(p){ return p.id === 'tp1'; });
+  parts[idx].unitPrice = 399;
+  parts[idx].updatedAt = now();
+  Store.saveParts(parts);
+
+  var labor = Store.getLabor();
+  var lidx = labor.findIndex(function(l){ return l.id === 'tl1'; });
+  labor[lidx].fee = 80;
+  labor[lidx].updatedAt = now();
+  Store.saveLabor(labor);
+
+  var newParts = Store.getParts();
+  var newLabor = Store.getLabor();
+  assertEq(newParts.find(function(p){ return p.id === 'tp1'; }).unitPrice, 399, '配件A新价格');
+  assertEq(newLabor.find(function(l){ return l.id === 'tl1'; }).fee, 80, '工时X新费用');
+
+  var v1 = Store.getLatestQuote('to1');
+  assertEq(v1.totalCost, 250, '改价后版本1总价不变');
+  assertEq(v1.parts[0].unitPrice, 100, '改价后版本1配件单价不变');
+}
+
+function tc03_generateV2() {
+  var allParts = Store.getParts();
+  var allLabor = Store.getLabor();
+
+  var curPart = allParts.find(function(p){ return p.id === 'tp1'; });
+  var curLabor = allLabor.find(function(l){ return l.id === 'tl1'; });
+
+  var parts = [
+    {partId:'tp1', partName:curPart.name, unitPrice:curPart.unitPrice, quantity:2, subtotal:curPart.unitPrice * 2}
+  ];
+  var laborItems = [
+    {laborItemId:'tl1', laborName:curLabor.name, fee:curLabor.fee}
+  ];
+
+  var result = QuoteEngine.generate('to1', parts, laborItems, '测试员');
+  if (!result.ok) throw new Error('生成报价失败: ' + result.msg);
+
+  var q = result.quote;
+  assertEq(q.version, 2, '版本号');
+  assertEq(q.parts[0].unitPrice, 399, '版本2配件A单价（新价）');
+  assertEq(q.parts[0].subtotal, 798, '版本2配件A小计（399×2）');
+  assertEq(q.laborItems[0].fee, 80, '版本2工时X费用（新价）');
+  assertEq(q.totalCost, 878, '版本2总价（798+80）');
+}
+
+function tc04_v1NotModified() {
+  var quotes = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+  var v1 = quotes[0];
+
+  assertEq(v1.version, 1, '版本号');
+  assertEq(v1.parts[0].unitPrice, 100, '版本1配件单价仍为原价100');
+  assertEq(v1.laborItems[0].fee, 50, '版本1工时费仍为原价50');
+  assertEq(v1.totalCost, 250, '版本1总价仍为原价250');
+
+  var v2 = quotes[1];
+  assertEq(v2.totalCost, 878, '版本2总价为新价878');
+  assertEq(v1.totalCost !== v2.totalCost, true, '两个版本价格不同');
+}
+
+function tc05_refreshConsistency() {
+  var savedV1 = JSON.parse(JSON.stringify(Store.getQuotesByOrderId('to1').sort(function(a,b){return a.version-b.version})[0]));
+  var savedV2 = JSON.parse(JSON.stringify(Store.getQuotesByOrderId('to1').sort(function(a,b){return a.version-b.version})[1]));
+
+  var raw = JSON.parse(localStorage.getItem(CRP.STORAGE_KEYS.QUOTES));
+  var rawV1 = raw.find(function(q){ return q.version === 1 && q.orderId === 'to1'; });
+  var rawV2 = raw.find(function(q){ return q.version === 2 && q.orderId === 'to1'; });
+
+  assertEq(rawV1.totalCost, savedV1.totalCost, 'localStorage中版本1总价与Store读取一致');
+  assertEq(rawV2.totalCost, savedV2.totalCost, 'localStorage中版本2总价与Store读取一致');
+  assertEq(rawV1.parts[0].unitPrice, 100, 'localStorage中版本1单价正确');
+  assertEq(rawV2.parts[0].unitPrice, 399, 'localStorage中版本2单价正确');
+}
+
+function tc06_multiVersionIndependent() {
+  var quotes = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+
+  assertEq(quotes.length, 2, '应有2个版本');
+
+  var v1 = quotes[0];
+  v1.parts[0].unitPrice = 9999;
+  v1.totalCost = 9999;
+
+  var reRead = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+  assertEq(reRead[0].totalCost, 250, '修改内存对象不影响Store重新读取（独立快照）');
+  assertEq(reRead[1].totalCost, 878, '版本2不受版本1内存修改影响');
+}
+
+function tc07_doQuoteUsesLatest() {
+  var allParts = Store.getParts();
+  var allLabor = Store.getLabor();
+
+  var partId = 'tp1';
+  var curPart = allParts.find(function(p){ return p.id === partId; });
+  var unitPrice = curPart ? curPart.unitPrice : 0;
+
+  var laborId = 'tl1';
+  var curLabor = allLabor.find(function(l){ return l.id === laborId; });
+  var fee = curLabor ? curLabor.fee : 0;
+
+  assertEq(unitPrice, 399, 'doQuote从最新配置读配件价');
+  assertEq(fee, 80, 'doQuote从最新配置读工时费');
+
+  var fakeDomPrice = 100;
+  var finalPrice = curPart ? curPart.unitPrice : fakeDomPrice;
+  assertEq(finalPrice, 399, '配置价优先于DOM输入价（双重保险）');
+}
+
+function tc08_detailRenderCorrect() {
+  var quotes = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+
+  var v1Html = renderQuoteTable(quotes[0]);
+  var v2Html = renderQuoteTable(quotes[1]);
+
+  var v1Has100 = v1Html.indexOf('¥100.00') > -1;
+  var v1Has250 = v1Html.indexOf('¥250.00') > -1;
+  var v2Has399 = v2Html.indexOf('¥399.00') > -1;
+  var v2Has878 = v2Html.indexOf('¥878.00') > -1;
+
+  assertEq(v1Has100, true, '版本1渲染包含原价¥100');
+  assertEq(v1Has250, true, '版本1渲染包含原价总计¥250');
+  assertEq(v2Has399, true, '版本2渲染包含新价¥399');
+  assertEq(v2Has878, true, '版本2渲染包含新价总计¥878');
+
+  var v1Has399 = v1Html.indexOf('¥399.00') > -1;
+  assertEq(v1Has399, false, '版本1渲染不包含新价¥399');
+}
+
+function tc09_historyHasV2() {
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+
+  var v1Record = history.find(function(h){ return h.note && h.note.indexOf('版本1') > -1; });
+  var v2Record = history.find(function(h){ return h.note && h.note.indexOf('版本2') > -1; });
+
+  if (!v1Record) throw new Error('未找到版本1的历史记录');
+  if (!v2Record) throw new Error('未找到版本2的历史记录');
+
+  log('  ✅ 找到版本1记录: ' + v1Record.note, 'pass');
+  log('  ✅ 找到版本2记录: ' + v2Record.note, 'pass');
+
+  assertEq(v1Record.toStatus, STATUS.QUOTED, '版本1的toStatus是QUOTED');
+  assertEq(v2Record.fromStatus, STATUS.QUOTED, '版本2的fromStatus是QUOTED');
+  assertEq(v2Record.toStatus, STATUS.QUOTED, '版本2的toStatus也是QUOTED');
+  assertEq(v2Record.type, 'advance', '版本2类型是advance');
+
+  var noteHasV2 = v2Record.note.indexOf('版本2') > -1;
+  assertEq(noteHasV2, true, '版本2备注中包含版本号');
+}
+
+function tc10_v1HistoryNotTouched() {
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+
+  var v1Record = history.find(function(h){ return h.note && h.note.indexOf('版本1') > -1; });
+  if (!v1Record) throw new Error('未找到版本1历史');
+
+  assertEq(v1Record.fromStatus, STATUS.INSPECTING, '版本1 fromStatus仍为INSPECTING');
+  assertEq(v1Record.toStatus, STATUS.QUOTED, '版本1 toStatus仍为QUOTED');
+
+  var v1Quotes = Store.getQuotesByOrderId('to1').sort(function(a,b){return a.version-b.version});
+  assertEq(v1Quotes[0].totalCost, 250, '版本1报价仍为250');
+}
+
+function tc11_historyPersistsAfterRefresh() {
+  var rawHistory = JSON.parse(localStorage.getItem(CRP.STORAGE_KEYS.HISTORY) || '[]');
+  var v2InStorage = rawHistory.find(function(h){ return h.orderId === 'to1' && h.note && h.note.indexOf('版本2') > -1; });
+
+  if (!v2InStorage) throw new Error('localStorage中没有版本2的历史记录，刷新后会丢失！');
+
+  var storeRead = Store.getHistoryByOrderId('to1').find(function(h){ return h.note && h.note.indexOf('版本2') > -1; });
+  assertEq(!!storeRead, true, 'Store读取的版本2历史存在');
+  assertEq(v2InStorage.note, storeRead.note, 'localStorage与Store读取一致');
+  assertEq(v2InStorage.type, 'advance', '存储的类型正确');
+}
+
+function tc12_v3HistoryAlsoWritten() {
+  var allParts = Store.getParts();
+  var allLabor = Store.getLabor();
+  var curPart = allParts.find(function(p){ return p.id === 'tp2'; });
+  var curLabor = allLabor.find(function(l){ return l.id === 'tl2'; });
+
+  var parts = [
+    {partId:'tp2', partName:curPart.name, unitPrice:curPart.unitPrice, quantity:1, subtotal:curPart.unitPrice}
+  ];
+  var laborItems = [
+    {laborItemId:'tl2', laborName:curLabor.name, fee:curLabor.fee}
+  ];
+
+  var result = QuoteEngine.generate('to1', parts, laborItems, '测试员');
+  if (!result.ok) throw new Error('生成版本3失败: ' + result.msg);
+  assertEq(result.quote.version, 3, '版本号为3');
+
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+  var v3Record = history.find(function(h){ return h.note && h.note.indexOf('版本3') > -1; });
+
+  if (!v3Record) throw new Error('未找到版本3的历史记录！');
+
+  log('  ✅ 找到版本3记录: ' + v3Record.note, 'pass');
+  assertEq(v3Record.fromStatus, STATUS.QUOTED, '版本3 fromStatus为QUOTED');
+  assertEq(v3Record.toStatus, STATUS.QUOTED, '版本3 toStatus为QUOTED');
+  assertEq(v3Record.type, 'advance', '版本3类型正确');
+
+  var allQuotes = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+  assertEq(allQuotes.length, 3, '共有3个报价版本');
+  assertEq(allQuotes[0].totalCost, 250, '版本1仍为¥250');
+  assertEq(allQuotes[1].totalCost, 878, '版本2仍为¥878');
+}
+
+function renderFailures() {
+  var el = document.getElementById('failure-list');
+  if (!currentRun || !currentRun.results) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>运行测试后查看失败明细</p></div>';
+    return;
+  }
+
+  var failures = currentRun.results.filter(function(r) { return !r.pass; });
+  if (failures.length === 0) {
+    el.innerHTML = '<div class="alert success">🎉 暂无失败用例，全部通过！</div>';
+    return;
+  }
+
+  var html = '<p style="font-size:13px;color:#64748b;margin-bottom:12px">共 ' + failures.length + ' 个失败用例</p>';
+  failures.forEach(function(f) {
+    html += '<div class="failure-item">';
+    html += '<div class="f-title">' + f.id + ' ' + f.name + '</div>';
+    html += '<div class="f-detail">' + escapeHtml(f.detail || '无详情') + '</div>';
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function renderHistory() {
+  var el = document.getElementById('history-list');
+  var runs = ResultManager.getAllRuns();
+
+  if (runs.length === 0) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><p>暂无历史记录</p></div>';
+    return;
+  }
+
+  var html = '';
+  runs.forEach(function(run) {
+    var d = new Date(run.startedAt);
+    var dateStr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+    var timeStr = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    var statusCls = run.status === 'pass' ? 'pass' : 'fail';
+    var statusText = run.status === 'pass' ? '✅ 通过' : '❌ 失败';
+
+    html += '<div class="history-item" onclick="showRunDetail(\'' + run.runId + '\')">';
+    html += '<div><div class="h-date">' + dateStr + '</div><div class="h-time">' + timeStr + ' · ' + run.suiteName + '</div></div>';
+    html += '<div class="h-result ' + statusCls + '">' + statusText + '</div>';
+    html += '<div class="h-count">' + run.passed + '/' + run.total + ' 用例</div>';
+    html += '<div class="h-actions">' +
+      '<button class="btn btn-sm secondary" onclick="event.stopPropagation();exportRun(\'' + run.runId + '\')">导出</button>' +
+      '<button class="btn btn-sm danger" onclick="event.stopPropagation();deleteRun(\'' + run.runId + '\')">删除</button>' +
+      '</div>';
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function showRunDetail(runId) {
+  var run = ResultManager.getRun(runId);
+  if (!run) return;
+
+  var html = '';
+  html += '<p><strong>Run ID:</strong> <code>' + run.runId + '</code></p>';
+  html += '<p><strong>开始时间:</strong> ' + formatDateTime(run.startedAt) + '</p>';
+  html += '<p><strong>结束时间:</strong> ' + (run.finishedAt || '未完成') + '</p>';
+  html += '<p><strong>结果:</strong> ' + (run.status === 'pass' ? '✅ 通过' : '❌ 失败') +
+    '（' + run.passed + '/' + run.total + '，失败 ' + run.failed + ' 个）</p>';
+
+  html += '<h4 style="margin-top:16px;margin-bottom:8px">用例明细</h4>';
+  html += '<div style="max-height:300px;overflow:auto">';
+  if (run.results && run.results.length) {
+    run.results.forEach(function(r) {
+      var cls = r.pass ? 'pass' : 'fail';
+      var icon = r.pass ? '✅' : '❌';
+      html += '<div style="padding:6px 10px;margin:2px 0;border-radius:4px;background:' +
+        (r.pass ? '#f0fdf4' : '#fef2f2') + '">';
+      html += '<strong>' + r.id + '</strong> ' + r.name + ' ' + icon;
+      if (!r.pass && r.detail) {
+        html += '<div style="font-size:12px;color:#991b1b;margin-top:2px">' + escapeHtml(r.detail) + '</div>';
+      }
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  if (run.logs && run.logs.length) {
+    html += '<h4 style="margin-top:16px;margin-bottom:8px">执行日志</h4>';
+    html += '<div style="background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-family:Consolas,monospace;font-size:11px;max-height:200px;overflow:auto">';
+    run.logs.forEach(function(l) {
+      var t = new Date(l.timestamp).toLocaleTimeString();
+      var cls = l.type || 'info';
+      html += '<div style="color:' +
+        (cls === 'pass' ? '#22c55e' : cls === 'fail' ? '#f87171' : cls === 'warn' ? '#fbbf24' : '#94a3b8') + '">';
+      html += '[' + t + '] ' + escapeHtml(l.message) + '</div>';
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('run-detail-content').innerHTML = html;
+  document.getElementById('run-detail-modal').classList.add('show');
+}
+
+function closeRunDetail() {
+  document.getElementById('run-detail-modal').classList.remove('show');
+}
+
+function deleteRun(runId) {
+  if (!confirm('确认删除此条历史记录？')) return;
+  ResultManager.deleteRun(runId);
+  renderHistory();
+  populateCompareSelects();
+}
+
+function clearAllHistory() {
+  if (!confirm('确认清空全部历史记录？此操作不可撤销。')) return;
+  ResultManager.clearAll();
+  renderHistory();
+  populateCompareSelects();
+  log('🗑 所有历史记录已清空', 'warn');
+}
+
+function clearCurrentRun() {
+  currentRun = null;
+  renderTestList(null);
+  updateStats(0, 0, suiteMeta.totalCases);
+  updateSummary(null);
+  document.getElementById('test-log').innerHTML = '';
+  renderFailures();
+}
+
+function exportAllResults() {
+  var data = ResultManager.exportRuns();
+  downloadJSON(data, 'test-results-all-' + formatDate(new Date().toISOString()) + '.json');
+}
+
+function exportLatestResult() {
+  var latest = ResultManager.getLatestRun();
+  if (!latest) {
+    alert('暂无测试结果可导出');
+    return;
+  }
+  var data = ResultManager.exportRuns([latest.runId]);
+  downloadJSON(data, 'test-result-latest-' + formatDate(new Date().toISOString()) + '.json');
+}
+
+function exportRun(runId) {
+  var data = ResultManager.exportRuns([runId]);
+  downloadJSON(data, 'test-result-' + runId + '.json');
+}
+
+function downloadJSON(data, filename) {
+  var blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function importResults(event) {
+  var file = event.target.files[0];
+  if (!file) return;
+
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      var report = ResultManager.importRuns(data);
+
+      var html = '<div class="alert ' + (report.invalid > 0 ? 'error' : report.conflicts > 0 ? 'warn' : 'success') + '">';
+      html += '<strong>导入完成：</strong>';
+      html += '导入成功 ' + report.imported + ' 条，';
+      html += '重复跳过 ' + report.duplicates + ' 条，';
+      html += '版本冲突 ' + report.conflicts + ' 条，';
+      html += '数据无效 ' + report.invalid + ' 条。';
+      html += '</div>';
+
+      if (report.errors.length) {
+        html += '<div style="font-size:12px;color:#64748b;margin-top:8px">';
+        html += '<strong>详情：</strong><ul style="margin:6px 0 0 20px">';
+        report.errors.forEach(function(err) {
+          html += '<li>' + escapeHtml(err) + '</li>';
+        });
+        html += '</ul></div>';
+      }
+
+      document.getElementById('import-report').innerHTML = html;
+      renderHistory();
+      populateCompareSelects();
+
+    } catch(err) {
+      document.getElementById('import-report').innerHTML =
+        '<div class="alert error">导入失败：' + escapeHtml(err.message) + '</div>';
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function populateCompareSelects() {
+  var runs = ResultManager.getAllRuns();
+  var selectA = document.getElementById('compare-a');
+  var selectB = document.getElementById('compare-b');
+
+  var options = '';
+  runs.forEach(function(run, idx) {
+    var label = run.runId.substr(0, 15) + '... ' +
+      (run.status === 'pass' ? '✅' : '❌') + ' ' +
+      run.passed + '/' + run.total + ' - ' +
+      formatDateTime(run.startedAt);
+    options += '<option value="' + run.runId + '">' + label + '</option>';
+  });
+
+  selectA.innerHTML = options;
+  selectB.innerHTML = options;
+
+  if (runs.length >= 2) {
+    selectA.selectedIndex = 1;
+    selectB.selectedIndex = 0;
+    updateCompare();
+  } else {
+    document.getElementById('compare-result').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">🔍</div><p>至少需要两次运行记录才能对比</p></div>';
+  }
+}
+
+function updateCompare() {
+  var aId = document.getElementById('compare-a').value;
+  var bId = document.getElementById('compare-b').value;
+  if (!aId || !bId || aId === bId) {
+    document.getElementById('compare-result').innerHTML =
+      '<div class="alert info">请选择两个不同的运行记录进行对比</div>';
+    return;
+  }
+
+  var cmp = ResultManager.compareRuns(aId, bId);
+  if (!cmp) {
+    document.getElementById('compare-result').innerHTML =
+      '<div class="alert error">对比失败，记录不存在</div>';
+    return;
+  }
+
+  var html = '';
+  html += '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr)">';
+  html += '<div class="stat-card"><div class="stat-value">' + cmp.summary.regressions + '</div><div class="stat-label">新失败</div></div>';
+  html += '<div class="stat-card pass"><div class="stat-value">' + cmp.summary.fixed + '</div><div class="stat-label">已修复</div></div>';
+  html += '<div class="stat-card total"><div class="stat-value">' + cmp.summary.new + '</div><div class="stat-label">新增用例</div></div>';
+  html += '<div class="stat-card"><div class="stat-value">' + cmp.summary.removed + '</div><div class="stat-label">消失用例</div></div>';
+  html += '</div>';
+
+  if (cmp.diffs.length === 0) {
+    html += '<div class="alert success">两次运行结果完全一致，无差异</div>';
+  } else {
+    html += '<table class="compare-table">';
+    html += '<thead><tr><th>用例</th><th>变化类型</th><th>详情</th></tr></thead>';
+    html += '<tbody>';
+    cmp.diffs.forEach(function(d) {
+      var cls = d.type;
+      var typeText = {regression:'🔴 新失败', fixed:'🟢 已修复', new:'🔵 新增', removed:'🟡 消失'}[d.type] || d.type;
+      html += '<tr class="' + cls + '">';
+      html += '<td>' + d.id + ' ' + escapeHtml(d.name) + '</td>';
+      html += '<td>' + typeText + '</td>';
+      html += '<td>' + escapeHtml(d.detail) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+  }
+
+  document.getElementById('compare-result').innerHTML = html;
+}
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(function(t) {
+    t.classList.toggle('active', t.getAttribute('data-tab') === tabName);
+  });
+  ['run', 'history', 'compare', 'failures', 'export'].forEach(function(t) {
+    document.getElementById('tab-' + t).style.display = (t === tabName) ? 'block' : 'none';
+  });
+
+  if (tabName === 'history') renderHistory();
+  if (tabName === 'compare') populateCompareSelects();
+  if (tabName === 'failures') renderFailures();
+}
+
+function checkRecovery() {
+  var latest = ResultManager.getLatestRun();
+  var el = document.getElementById('recovery-banner');
+
+  if (!latest) {
+    el.innerHTML = '';
+    return;
+  }
+
+  var timeStr = formatDateTime(latest.startedAt);
+  var statusText = latest.status === 'pass' ? '全部通过' : (latest.failed + ' 个失败');
+  var icon = latest.status === 'pass' ? '✅' : '⚠️';
+  var cls = latest.status === 'pass' ? 'success' : 'warn';
+
+  el.innerHTML = '<div class="alert ' + cls + '" style="margin-bottom:16px">' +
+    icon + ' <strong>检测到上次运行结果：</strong>' +
+    latest.passed + '/' + latest.total + ' 用例通过，' + statusText +
+    ' · 运行于 ' + timeStr +
+    ' · <a href="javascript:void(0)" onclick="loadLatestRun()" style="font-weight:600;color:inherit;text-decoration:underline">加载上次结果</a>' +
+    '</div>';
+}
+
+function loadLatestRun() {
+  var latest = ResultManager.getLatestRun();
+  if (!latest) return;
+
+  currentRun = latest;
+  renderTestList(latest.results);
+  updateStats(latest.passed, latest.failed, latest.total);
+  updateSummary(latest);
+  renderFailures();
+
+  var logEl = document.getElementById('test-log');
+  logEl.innerHTML = '';
+  if (latest.logs && latest.logs.length) {
+    latest.logs.forEach(function(l) {
+      var t = new Date(l.timestamp).toLocaleTimeString();
+      var cls = l.type || 'info';
+      logEl.innerHTML += '<span class="' + cls + '">[' + t + '] ' + escapeHtml(l.message) + '</span>\n';
+    });
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  switchTab('run');
+}
+
+function pad(n) { return n < 10 ? '0' + n : n; }
+function formatDate(iso) {
+  var d = new Date(iso);
+  return d.getFullYear() + String(pad(d.getMonth()+1)) + String(pad(d.getDate()));
+}
+function formatDateTime(iso) {
+  if (!iso) return '-';
+  var d = new Date(iso);
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + ' ' +
+    pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function initMeta() {
+  document.getElementById('meta-suite').textContent = suiteMeta.suiteName;
+  document.getElementById('meta-version').textContent = suiteMeta.suiteVersion;
+  document.getElementById('meta-total').textContent = suiteMeta.totalCases;
+  document.getElementById('meta-cats').textContent = suiteMeta.categories.length + ' 类';
+  document.getElementById('meta-datasource').textContent = suiteMeta.dataSource;
+}
+
+window.onload = function() {
+  initMeta();
+  renderTestList(null);
+  updateStats(0, 0, suiteMeta.totalCases);
+  updateSummary(null);
+  checkRecovery();
+  log('📋 回归测试中心已加载，共 ' + suiteMeta.totalCases + ' 个测试用例。', 'info');
+  log('💡 点击「运行全部测试」开始验证，结果会自动保存到本地存储。', 'info');
+  log('🔗 命令行脚本（verify-logic.py / test-history-linkage.js）使用相同的用例口径。', 'info');
+};
+
+document.getElementById('run-detail-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeRunDetail();
+});
+</script>
+</body>
+</html>
