@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>批量导入审计中心 - 验收测试</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .test-result { padding: 12px; border-radius: 8px; margin-bottom: 8px; }
+  .test-pass { background: #d1fae5; color: #065f46; }
+  .test-fail { background: #fee2e2; color: #991b1b; }
+  .test-info { background: #e0e7ff; color: #3730a3; }
+  .test-section { margin-bottom: 24px; }
+  .test-section h3 { margin-bottom: 12px; color: var(--text-primary); }
+  .test-output { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; margin-top: 12px; }
+  .stats-bar { display: flex; gap: 24px; padding: 16px; background: var(--card-bg); border-radius: 8px; margin-bottom: 20px; }
+  .stat-item { text-align: center; }
+  .stat-item .num { font-size: 24px; font-weight: 700; }
+  .stat-item .label { font-size: 12px; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-icon">🧪</div>
+      <h1>验收测试</h1>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" onclick="window.location.href='index.html'" class="nav-item">
+        <span class="nav-icon">←</span><span class="nav-text">返回主系统</span>
+      </a>
+    </nav>
+  </aside>
+  <main class="main-content">
+    <div class="page active">
+      <div class="page-header">
+        <h2>🧪 批量导入审计中心 - 验收测试</h2>
+        <p>测试正常导入、冲突回退、导出再导入、跨重启核对一致</p>
+      </div>
+      
+      <div class="stats-bar">
+        <div class="stat-item"><div class="num" id="stat-total">0</div><div class="label">总计</div></div>
+        <div class="stat-item"><div class="num" id="stat-pass" style="color:var(--success)">0</div><div class="label">通过</div></div>
+        <div class="stat-item"><div class="num" id="stat-fail" style="color:var(--danger)">0</div><div class="label">失败</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="action-bar">
+            <button class="btn btn-primary" onclick="runAllTests()">▶ 运行全部测试</button>
+            <button class="btn" onclick="clearStorage()">🧹 清空测试数据</button>
+            <button class="btn" onclick="exportTestData()">📥 导出测试数据</button>
+          </div>
+          <div id="test-results"></div>
+          <div class="test-output" id="test-output"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toast-container" class="toast-container"></div>
+<script src="app.js"></script>
+<script src="test-import-audit.js"></script>
+</body>
+</html>

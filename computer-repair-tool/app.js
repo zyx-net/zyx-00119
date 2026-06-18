@@ -33,7 +33,10 @@ var STORAGE_KEYS={
   ORDERS:'crp_orders',PARTS:'crp_parts',LABOR:'crp_labor',
   QUOTES:'crp_quotes',HISTORY:'crp_history',
   ROLLBACKS:'crp_rollback_records',TERMINATIONS:'crp_termination_records',
-  INITIALIZED:'crp_initialized'
+  INITIALIZED:'crp_initialized',
+  IMPORT_TASKS:'crp_import_tasks',
+  IMPORT_AUDIT_LOGS:'crp_import_audit_logs',
+  IMPORT_STATE:'crp_import_state'
 };
 
 function uuid(){return 'xxxx-xxxx'.replace(/x/g,function(){return Math.floor(Math.random()*16).toString(16)})}
@@ -75,7 +78,14 @@ var Store={
   getRollbacksByOrderId:function(oid){return this.getRollbacks().filter(function(r){return r.orderId===oid})},
   getTerminations:function(){return this.load(STORAGE_KEYS.TERMINATIONS)||[]},
   saveTerminations:function(o){this.save(STORAGE_KEYS.TERMINATIONS,o)},
-  getTerminationByOrderId:function(oid){return this.getTerminations().find(function(t){return t.orderId===oid})}
+  getTerminationByOrderId:function(oid){return this.getTerminations().find(function(t){return t.orderId===oid})},
+  getImportTasks:function(){return this.load(STORAGE_KEYS.IMPORT_TASKS)||[]},
+  saveImportTasks:function(o){this.save(STORAGE_KEYS.IMPORT_TASKS,o)},
+  getImportTaskById:function(id){return this.getImportTasks().find(function(t){return t.id===id})},
+  getImportAuditLogs:function(){return this.load(STORAGE_KEYS.IMPORT_AUDIT_LOGS)||[]},
+  saveImportAuditLogs:function(o){this.save(STORAGE_KEYS.IMPORT_AUDIT_LOGS,o)},
+  getImportState:function(){return this.load(STORAGE_KEYS.IMPORT_STATE)||null},
+  saveImportState:function(o){this.save(STORAGE_KEYS.IMPORT_STATE,o)}
 };
 
 var Validator={
@@ -225,6 +235,487 @@ var QuoteEngine={
   }
 };
 
+var IMPORT_DATA_TYPES={
+  ORDERS:'orders',
+  QUOTES:'quotes',
+  HISTORY:'history'
+};
+
+var IMPORT_TASK_STATUS={
+  PRECHECK:'precheck',
+  PENDING:'pending',
+  PROCESSING:'processing',
+  PARTIAL:'partial',
+  COMPLETED:'completed',
+  FAILED:'failed',
+  ROLLED_BACK:'rolled_back'
+};
+
+var IMPORT_CONFLICT_TYPES={
+  DUPLICATE:'duplicate',
+  VERSION_MISMATCH:'version_mismatch',
+  MISSING_FIELDS:'missing_fields',
+  PERMISSION:'permission'
+};
+
+var ImportAuditEngine={
+  _parseFile:function(file){
+    var self=this;
+    return new Promise(function(resolve,reject){
+      var reader=new FileReader();
+      reader.onload=function(e){
+        try{
+          var data=JSON.parse(e.target.result);
+          resolve({
+            fileName:file.name,
+            fileSize:file.size,
+            fileType:file.type,
+            uploadedAt:now(),
+            data:data
+          });
+        }catch(err){
+          reject(new Error('文件解析失败：'+err.message));
+        }
+      };
+      reader.onerror=function(){reject(new Error('文件读取失败'));};
+      reader.readAsText(file);
+    });
+  },
+
+  _detectDataType:function(data){
+    var types=[];
+    if(data.orders&&Array.isArray(data.orders)&&data.orders.length>0)types.push(IMPORT_DATA_TYPES.ORDERS);
+    if(data.quotes&&Array.isArray(data.quotes)&&data.quotes.length>0)types.push(IMPORT_DATA_TYPES.QUOTES);
+    if(data.history&&Array.isArray(data.history)&&data.history.length>0)types.push(IMPORT_DATA_TYPES.HISTORY);
+    return types;
+  },
+
+  _validateSchema:function(item,requiredFields,itemName){
+    var missing=[];
+    requiredFields.forEach(function(f){
+      if(item[f]===undefined||item[f]===null||item[f]===''){
+        missing.push(f);
+      }
+    });
+    return{
+      valid:missing.length===0,
+      missing:missing,
+      itemName:itemName
+    };
+  },
+
+  _validateOrders:function(orders,existingOrders){
+    var results=[];
+    var existingMap={};
+    existingOrders.forEach(function(o){existingMap[o.id]=o;existingMap[o.orderNo]=o;});
+    var requiredFields=['id','orderNo','customerName','customerPhone','deviceType','deviceBrand','faultDescription','currentStatus'];
+    orders.forEach(function(order,idx){
+      var schemaResult=this._validateSchema(order,requiredFields,'工单 '+(order.orderNo||order.id||('第'+(idx+1)+'条')));
+      if(!schemaResult.valid){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.MISSING_FIELDS,
+          severity:'error',
+          itemId:order.id,
+          itemName:schemaResult.itemName,
+          message:schemaResult.itemName+'缺少必填字段：'+schemaResult.missing.join(', '),
+          data:order
+        });
+        return;
+      }
+      if(existingMap[order.id]){
+        var existing=existingMap[order.id];
+        var isSame=JSON.stringify(order)===JSON.stringify(existing);
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.DUPLICATE,
+          severity:isSame?'warning':'error',
+          itemId:order.id,
+          itemName:schemaResult.itemName+' (ID: '+order.id+')',
+          message:isSame?'数据完全相同，将跳过':('ID已存在，'+order.currentStatus+'，不覆盖旧记录'),
+          data:order,
+          existing:existing,
+          isSame:isSame
+        });
+      }else if(existingMap[order.orderNo]){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.DUPLICATE,
+          severity:'error',
+          itemId:order.id,
+          itemName:schemaResult.itemName+' (工单号: '+order.orderNo+')',
+          message:'工单号已存在，'+existingMap[order.orderNo].currentStatus+'，不覆盖旧记录',
+          data:order,
+          existing:existingMap[order.orderNo],
+          isSame:false
+        });
+      }
+    }.bind(this));
+    return results;
+  },
+
+  _validateQuotes:function(quotes,existingQuotes,existingOrders){
+    var results=[];
+    var existingMap={};
+    existingQuotes.forEach(function(q){existingMap[q.id]=q;});
+    var orderIds=existingOrders.map(function(o){return o.id});
+    var requiredFields=['id','orderId','version','parts','laborItems','totalCost','createdAt'];
+    quotes.forEach(function(quote,idx){
+      var schemaResult=this._validateSchema(quote,requiredFields,'报价 '+(quote.id||('第'+(idx+1)+'条')));
+      if(!schemaResult.valid){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.MISSING_FIELDS,
+          severity:'error',
+          itemId:quote.id,
+          message:schemaResult.itemName+'缺少必填字段：'+schemaResult.missing.join(', '),
+          data:quote
+        });
+        return;
+      }
+      if(orderIds.indexOf(quote.orderId)===-1){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.PERMISSION,
+          severity:'error',
+          itemId:quote.id,
+          itemName:schemaResult.itemName+' (ID: '+quote.id+')',
+          message:'关联工单ID '+quote.orderId+' 不存在，无法导入',
+          data:quote
+        });
+        return;
+      }
+      var existingVersions=existingQuotes.filter(function(q){return q.orderId===quote.orderId}).map(function(q){return q.version});
+      if(existingVersions.indexOf(quote.version)>-1){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.VERSION_MISMATCH,
+          severity:'error',
+          itemId:quote.id,
+          itemName:schemaResult.itemName+' (订单: '+quote.orderId+', 版本: '+quote.version+')',
+          message:'该工单已存在版本 '+quote.version+'，不覆盖旧记录',
+          data:quote,
+          existing:existingQuotes.find(function(q){return q.orderId===quote.orderId&&q.version===quote.version})
+        });
+      }
+    }.bind(this));
+    return results;
+  },
+
+  _validateHistory:function(history,existingHistory,existingOrders){
+    var results=[];
+    var existingMap={};
+    existingHistory.forEach(function(h){existingMap[h.id]=h;});
+    var orderIds=existingOrders.map(function(o){return o.id});
+    var requiredFields=['id','orderId','toStatus','timestamp','type'];
+    history.forEach(function(h,idx){
+      var schemaResult=this._validateSchema(h,requiredFields,'历史记录 '+(h.id||('第'+(idx+1)+'条')));
+      if(!schemaResult.valid){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.MISSING_FIELDS,
+          severity:'error',
+          itemId:h.id,
+          message:schemaResult.itemName+'缺少必填字段：'+schemaResult.missing.join(', '),
+          data:h
+        });
+        return;
+      }
+      if(orderIds.indexOf(h.orderId)===-1){
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.PERMISSION,
+          severity:'error',
+          itemId:h.id,
+          itemName:schemaResult.itemName+' (ID: '+h.id+')',
+          message:'关联工单ID '+h.orderId+' 不存在，无法导入',
+          data:h
+        });
+        return;
+      }
+      if(existingMap[h.id]){
+        var isSame=JSON.stringify(h)===JSON.stringify(existingMap[h.id]);
+        results.push({
+          type:IMPORT_CONFLICT_TYPES.DUPLICATE,
+          severity:isSame?'warning':'error',
+          itemId:h.id,
+          itemName:schemaResult.itemName+' (ID: '+h.id+')',
+          message:isSame?'数据完全相同，将跳过':('ID已存在，不覆盖旧记录'),
+          data:h,
+          existing:existingMap[h.id],
+          isSame:isSame
+        });
+      }
+    }.bind(this));
+    return results;
+  },
+
+  precheck:function(parsedData){
+    var self=this;
+    return new Promise(function(resolve){
+      var data=parsedData.data;
+      var dataTypes=self._detectDataType(data);
+      var allConflicts=[];
+      var stats={
+        totalItems:0,
+        orders:{total:0,valid:0,conflicts:0,errors:0},
+        quotes:{total:0,valid:0,conflicts:0,errors:0},
+        history:{total:0,valid:0,conflicts:0,errors:0}
+      };
+      var existingOrders=Store.getOrders();
+      var existingQuotes=Store.getQuotes();
+      var existingHistory=Store.getHistory();
+      if(dataTypes.indexOf(IMPORT_DATA_TYPES.ORDERS)>-1){
+        stats.orders.total=data.orders.length;
+        var orderConflicts=self._validateOrders(data.orders,existingOrders);
+        allConflicts=allConflicts.concat(orderConflicts);
+        stats.orders.conflicts=orderConflicts.filter(function(c){return c.severity==='warning'}).length;
+        stats.orders.errors=orderConflicts.filter(function(c){return c.severity==='error'}).length;
+        stats.orders.valid=stats.orders.total-stats.orders.conflicts-stats.orders.errors;
+      }
+      if(dataTypes.indexOf(IMPORT_DATA_TYPES.QUOTES)>-1){
+        stats.quotes.total=data.quotes.length;
+        var quoteConflicts=self._validateQuotes(data.quotes,existingQuotes,existingOrders.concat(data.orders||[]));
+        allConflicts=allConflicts.concat(quoteConflicts);
+        stats.quotes.conflicts=quoteConflicts.filter(function(c){return c.severity==='warning'}).length;
+        stats.quotes.errors=quoteConflicts.filter(function(c){return c.severity==='error'}).length;
+        stats.quotes.valid=stats.quotes.total-stats.quotes.conflicts-stats.quotes.errors;
+      }
+      if(dataTypes.indexOf(IMPORT_DATA_TYPES.HISTORY)>-1){
+        stats.history.total=data.history.length;
+        var historyConflicts=self._validateHistory(data.history,existingHistory,existingOrders.concat(data.orders||[]));
+        allConflicts=allConflicts.concat(historyConflicts);
+        stats.history.conflicts=historyConflicts.filter(function(c){return c.severity==='warning'}).length;
+        stats.history.errors=historyConflicts.filter(function(c){return c.severity==='error'}).length;
+        stats.history.valid=stats.history.total-stats.history.conflicts-stats.history.errors;
+      }
+      stats.totalItems=stats.orders.total+stats.quotes.total+stats.history.total;
+      var overallStatus=IMPORT_TASK_STATUS.PENDING;
+      if(stats.orders.errors>0||stats.quotes.errors>0||stats.history.errors>0){
+        overallStatus=IMPORT_TASK_STATUS.PRECHECK;
+      }
+      resolve({
+        dataTypes:dataTypes,
+        conflicts:allConflicts,
+        stats:stats,
+        overallStatus:overallStatus,
+        canImport:stats.orders.valid+stats.quotes.valid+stats.history.valid>0,
+        parsedData:parsedData
+      });
+    });
+  },
+
+  createTask:function(precheckResult,handler,note){
+    var task={
+      id:'imp-'+uuid(),
+      source:precheckResult.parsedData.fileName,
+      sourceSize:precheckResult.parsedData.fileSize,
+      dataTypes:precheckResult.dataTypes,
+      status:precheckResult.overallStatus,
+      handler:handler||'系统',
+      note:note||'',
+      createdAt:now(),
+      startedAt:null,
+      finishedAt:null,
+      stats:precheckResult.stats,
+      conflicts:precheckResult.conflicts,
+      result:null,
+      snapshots:{
+        before:{
+          orders:JSON.parse(JSON.stringify(Store.getOrders())),
+          quotes:JSON.parse(JSON.stringify(Store.getQuotes())),
+          history:JSON.parse(JSON.stringify(Store.getHistory()))
+        },
+        after:null
+      },
+      rawData:precheckResult.parsedData.data
+    };
+    var tasks=Store.getImportTasks();
+    tasks.unshift(task);
+    Store.saveImportTasks(tasks);
+    this._saveAuditLog(task.id,'create','创建导入任务','任务已创建，等待处理');
+    return task;
+  },
+
+  executeImport:function(taskId){
+    var self=this;
+    return new Promise(function(resolve){
+      var tasks=Store.getImportTasks();
+      var task=tasks.find(function(t){return t.id===taskId});
+      if(!task){resolve({ok:false,msg:'任务不存在'});return;}
+      task.status=IMPORT_TASK_STATUS.PROCESSING;
+      task.startedAt=now();
+      Store.saveImportTasks(tasks);
+      self._saveAuditLog(taskId,'start','开始导入','开始执行导入操作');
+      var data=task.rawData;
+      var conflictIds=task.conflicts.filter(function(c){return c.itemId}).map(function(c){return c.itemId});
+      var result={
+        imported:{orders:0,quotes:0,history:0},
+        skipped:{orders:0,quotes:0,history:0},
+        failed:{orders:0,quotes:0,history:0},
+        logs:[],
+        details:[]
+      };
+      var existingOrders=Store.getOrders();
+      var existingQuotes=Store.getQuotes();
+      var existingHistory=Store.getHistory();
+      if(task.dataTypes.indexOf(IMPORT_DATA_TYPES.ORDERS)>-1&&data.orders){
+        data.orders.forEach(function(order){
+          var hasConflict=conflictIds.indexOf(order.id)>-1||existingOrders.some(function(o){return o.orderNo===order.orderNo});
+          if(hasConflict){
+            result.skipped.orders++;
+            result.details.push({type:'order',id:order.id,status:'skipped',reason:'存在冲突或重复'});
+          }else{
+            existingOrders.push(order);
+            result.imported.orders++;
+            result.details.push({type:'order',id:order.id,status:'imported'});
+          }
+        });
+      }
+      if(task.dataTypes.indexOf(IMPORT_DATA_TYPES.QUOTES)>-1&&data.quotes){
+        var allOrders=existingOrders;
+        var orderIds=allOrders.map(function(o){return o.id});
+        data.quotes.forEach(function(quote){
+          var hasConflict=conflictIds.indexOf(quote.id)>-1||!orderIds.some(function(id){return id===quote.orderId})||existingQuotes.some(function(q){return q.orderId===quote.orderId&&q.version===quote.version});
+          if(hasConflict){
+            result.skipped.quotes++;
+            result.details.push({type:'quote',id:quote.id,status:'skipped',reason:'存在冲突或关联工单不存在'});
+          }else{
+            existingQuotes.push(quote);
+            result.imported.quotes++;
+            result.details.push({type:'quote',id:quote.id,status:'imported'});
+          }
+        });
+      }
+      if(task.dataTypes.indexOf(IMPORT_DATA_TYPES.HISTORY)>-1&&data.history){
+        var allOrderIds=existingOrders.map(function(o){return o.id});
+        data.history.forEach(function(h){
+          var hasConflict=conflictIds.indexOf(h.id)>-1||!allOrderIds.some(function(id){return id===h.orderId});
+          if(hasConflict){
+            result.skipped.history++;
+            result.details.push({type:'history',id:h.id,status:'skipped',reason:'存在冲突或关联工单不存在'});
+          }else{
+            existingHistory.push(h);
+            result.imported.history++;
+            result.details.push({type:'history',id:h.id,status:'imported'});
+          }
+        });
+      }
+      Store.saveOrders(existingOrders);
+      Store.saveQuotes(existingQuotes);
+      Store.saveHistory(existingHistory);
+      task.snapshots.after={
+        orders:JSON.parse(JSON.stringify(existingOrders)),
+        quotes:JSON.parse(JSON.stringify(existingQuotes)),
+        history:JSON.parse(JSON.stringify(existingHistory))
+      };
+      task.result=result;
+      var totalImported=result.imported.orders+result.imported.quotes+result.imported.history;
+      var totalSkipped=result.skipped.orders+result.skipped.quotes+result.skipped.history;
+      if(totalImported>0&&totalSkipped>0){
+        task.status=IMPORT_TASK_STATUS.PARTIAL;
+      }else if(totalImported>0){
+        task.status=IMPORT_TASK_STATUS.COMPLETED;
+      }else{
+          task.status=IMPORT_TASK_STATUS.FAILED;
+      }
+      task.finishedAt=now();
+      Store.saveImportTasks(tasks);
+      self._saveAuditLog(taskId,'complete','导入完成','成功导入 '+totalImported+' 条，跳过 '+totalSkipped+' 条');
+      resolve({ok:true,task:task});
+    });
+  },
+
+  rollback:function(taskId,handler,reason){
+    var self=this;
+    return new Promise(function(resolve){
+      var tasks=Store.getImportTasks();
+      var task=tasks.find(function(t){return t.id===taskId});
+      if(!task){resolve({ok:false,msg:'任务不存在'});return;}
+      if(task.status===IMPORT_TASK_STATUS.ROLLED_BACK){
+        resolve({ok:false,msg:'任务已回滚，不能重复回滚'});return;
+      }
+      if(!task.snapshots||!task.snapshots.before){
+        resolve({ok:false,msg:'没有快照数据，无法回滚'});return;
+      }
+      Store.saveOrders(task.snapshots.before.orders);
+      Store.saveQuotes(task.snapshots.before.quotes);
+      Store.saveHistory(task.snapshots.before.history);
+      var prevStatus=task.status;
+      task.status=IMPORT_TASK_STATUS.ROLLED_BACK;
+      task.rollbackInfo={
+        handler:handler||'系统',
+        reason:reason||'用户操作回滚',
+        rolledBackAt:now(),
+        previousStatus:prevStatus
+      };
+      Store.saveImportTasks(tasks);
+      self._saveAuditLog(taskId,'rollback','执行回滚','已回滚到导入前状态，原因：'+(reason||'用户操作'));
+      resolve({ok:true,task:task});
+    });
+  },
+
+  exportResult:function(taskId){
+    var task=Store.getImportTaskById(taskId);
+    if(!task)return null;
+    var exportData={
+      exportFormat:'crp-import-result',
+      formatVersion:'1.0.0',
+      exportedAt:now(),
+      taskId:task.id,
+      source:task.source,
+      status:task.status,
+      handler:task.handler,
+      createdAt:task.createdAt,
+      startedAt:task.startedAt,
+      finishedAt:task.finishedAt,
+      stats:task.stats,
+      result:task.result,
+      conflicts:task.conflicts,
+      dataTypes:task.dataTypes,
+      note:task.note
+    };
+    return exportData;
+  },
+
+  _saveAuditLog:function(taskId,action,title,detail){
+    var logs=Store.getImportAuditLogs();
+    logs.unshift({
+      id:'log-'+uuid(),
+      taskId:taskId,
+      action:action,
+      title:title,
+      detail:detail,
+      timestamp:now()
+    });
+    Store.saveImportAuditLogs(logs);
+  },
+
+  getTaskList:function(filters){
+    var tasks=Store.getImportTasks();
+    if(filters){
+      if(filters.status){
+        tasks=tasks.filter(function(t){return t.status===filters.status});
+      }
+      if(filters.source){
+        var s=filters.source.toLowerCase();
+        tasks=tasks.filter(function(t){return t.source.toLowerCase().indexOf(s)>-1});
+      }
+      if(filters.handler){
+        var h=filters.handler.toLowerCase();
+        tasks=tasks.filter(function(t){return (t.handler||'').toLowerCase().indexOf(h)>-1});
+      }
+      if(filters.startDate){
+        tasks=tasks.filter(function(t){return new Date(t.createdAt)>=new Date(filters.startDate)});
+      }
+      if(filters.endDate){
+        tasks=tasks.filter(function(t){return new Date(t.createdAt)<=new Date(filters.endDate)});
+      }
+    }
+    return tasks;
+  },
+
+  saveCurrentState:function(state){
+    Store.saveImportState(state);
+  },
+
+  loadCurrentState:function(){
+    return Store.getImportState();
+  }
+};
+
 function showToast(message,type){
   type=type||'info';
   var c=document.getElementById('toast-container');
@@ -263,6 +754,7 @@ function navigateTo(page,opts){
     case'labor-config':UI.renderLaborConfig();break;
     case'history':UI.renderHistory();break;
     case'export':UI.renderExport();break;
+    case'import-audit':UI.renderImportAudit();break;
   }
 }
 
@@ -566,6 +1058,231 @@ var UI={
           '<button class="btn btn-warning" onclick="document.getElementById(\'import-file\').click()">📤 导入 JSON</button>'+
           '<input type="file" id="import-file" accept=".json" style="display:none" onchange="window.AppImportJSON(event)"></div>'+
       '</div>';
+  },
+
+  _importCurrentTab:'list',
+  _importFilters:{status:'',source:'',handler:''},
+  _importSelectedTaskId:null,
+  _importPrecheckResult:null,
+
+  renderImportAudit:function(){
+    var el=document.getElementById('page-import-audit');
+    var state=ImportAuditEngine.loadCurrentState();
+    if(state){
+      if(state.currentTab)this._importCurrentTab=state.currentTab;
+      if(state.filters)this._importFilters=state.filters;
+      if(state.selectedTaskId)this._importSelectedTaskId=state.selectedTaskId;
+    }
+    var tabsHtml='<div class="tabs">'+
+      '<button class="tab-btn '+(this._importCurrentTab==='list'?'active':'')+'" onclick="window.AppImportSwitchTab(\'list\')">📋 导入任务列表</button>'+
+      '<button class="tab-btn '+(this._importCurrentTab==='upload'?'active':'')+'" onclick="window.AppImportSwitchTab(\'upload\')">📤 新建导入</button>'+
+      '</div>';
+    var contentHtml='';
+    if(this._importCurrentTab==='list'){
+      contentHtml=this._renderImportTaskList();
+    }else if(this._importCurrentTab==='upload'){
+      contentHtml=this._renderImportUpload();
+    }else if(this._importCurrentTab==='detail'){
+      contentHtml=this._renderImportTaskDetail(this._importSelectedTaskId);
+    }
+    el.innerHTML=
+      '<div class="page-header"><h2>📋 批量导入审计中心</h2><p>管理批量导入任务，支持预检、导入、回滚、导出处理结果</p></div>'+
+      tabsHtml+
+      '<div id="import-audit-content">'+contentHtml+'</div>';
+    if(state&&this._importCurrentTab==='list'){
+      this._applyImportFilters();
+    }
+  },
+
+  _renderImportTaskList:function(){
+    var self=this;
+    var filters=this._importFilters;
+    var tasks=ImportAuditEngine.getTaskList(filters);
+    var statusOpts=Object.keys(IMPORT_TASK_STATUS).map(function(k){return '<option value="'+IMPORT_TASK_STATUS[k]+'">'+self._getImportStatusLabel(IMPORT_TASK_STATUS[k])+'</option>'}).join('');
+    var statusLabels={};
+    statusLabels[IMPORT_TASK_STATUS.PRECHECK]='预检中';
+    statusLabels[IMPORT_TASK_STATUS.PENDING]='待处理';
+    statusLabels[IMPORT_TASK_STATUS.PROCESSING]='处理中';
+    statusLabels[IMPORT_TASK_STATUS.PARTIAL]='部分成功';
+    statusLabels[IMPORT_TASK_STATUS.COMPLETED]='全部成功';
+    statusLabels[IMPORT_TASK_STATUS.FAILED]='全部失败';
+    statusLabels[IMPORT_TASK_STATUS.ROLLED_BACK]='已回滚';
+    var filterHtml='<div class="filter-bar">'+
+      '<select id="import-filter-status" onchange="window.AppImportFilterChange()">'+
+        '<option value="">全部状态</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.PRECHECK+'" '+(filters.status===IMPORT_TASK_STATUS.PRECHECK?'selected':'')+'>预检中</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.PENDING+'" '+(filters.status===IMPORT_TASK_STATUS.PENDING?'selected':'')+'>待处理</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.PROCESSING+'" '+(filters.status===IMPORT_TASK_STATUS.PROCESSING?'selected':'')+'>处理中</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.PARTIAL+'" '+(filters.status===IMPORT_TASK_STATUS.PARTIAL?'selected':'')+'>部分成功</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.COMPLETED+'" '+(filters.status===IMPORT_TASK_STATUS.COMPLETED?'selected':'')+'>全部成功</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.FAILED+'" '+(filters.status===IMPORT_TASK_STATUS.FAILED?'selected':'')+'>全部失败</option>'+
+        '<option value="'+IMPORT_TASK_STATUS.ROLLED_BACK+'" '+(filters.status===IMPORT_TASK_STATUS.ROLLED_BACK?'selected':'')+'>已回滚</option>'+
+      '</select>'+
+      '<input type="text" id="import-filter-source" placeholder="搜索来源文件..." value="'+esc(filters.source)+'" oninput="window.AppImportFilterChange()">'+
+      '<input type="text" id="import-filter-handler" placeholder="搜索处理人..." value="'+esc(filters.handler)+'" oninput="window.AppImportFilterChange()">'+
+      '<button class="btn btn-ghost" onclick="window.AppImportClearFilters()" style="margin-left:auto">清除筛选</button>'+
+    '</div>';
+    if(!tasks.length){
+      return filterHtml+'<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📋</div><p>暂无导入任务，点击「新建导入」开始</p></div></div></div>';
+    }
+    var tbody=tasks.map(function(t){
+      var statusBadge=self._getImportStatusBadge(t.status);
+      var dataTypes=t.dataTypes.map(function(dt){return self._getImportDataTypeLabel(dt)}).join('、');
+      var totalImported=t.result?(t.result.imported.orders+t.result.imported.quotes+t.result.imported.history):0;
+      var totalSkipped=t.result?(t.result.skipped.orders+t.result.skipped.quotes+t.result.skipped.history):0;
+      var canRollback=t.status!==IMPORT_TASK_STATUS.ROLLED_BACK&&t.status!==IMPORT_TASK_STATUS.PRECHECK&&t.status!==IMPORT_TASK_STATUS.PENDING&&t.status!==IMPORT_TASK_STATUS.PROCESSING;
+      return '<tr class="clickable-row" onclick="window.AppImportViewDetail(\''+t.id+'\')">'+
+        '<td><span class="order-no">'+t.id+'</span></td>'+
+        '<td>'+esc(t.source)+'</td>'+
+        '<td>'+dataTypes+'</td>'+
+        '<td>'+statusBadge+'</td>'+
+        '<td>'+totalImported+' / '+totalSkipped+'</td>'+
+        '<td>'+esc(t.handler||'-')+'</td>'+
+        '<td>'+formatDateTime(t.createdAt)+'</td>'+
+        '<td>'+
+          '<button class="btn btn-sm btn-primary" onclick="event.stopPropagation();window.AppImportViewDetail(\''+t.id+'\')">详情</button>'+
+          (canRollback?'<button class="btn btn-sm btn-warning" onclick="event.stopPropagation();window.AppImportShowRollbackModal(\''+t.id+'\')" style="margin-left:4px">↩ 回滚</button>':'')+
+          (t.result?'<button class="btn btn-sm" onclick="event.stopPropagation();window.AppImportExportResult(\''+t.id+'\')" style="margin-left:4px">📥 导出</button>':'')+
+        '</td>'+
+      '</tr>';
+    }).join('');
+    return filterHtml+
+      '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+        '<thead><tr><th>任务ID</th><th>来源文件</th><th>数据类型</th><th>状态</th><th>导入/跳过</th><th>处理人</th><th>创建时间</th><th>操作</th></tr></thead>'+
+        '<tbody>'+tbody+'</tbody>'+
+      '</table></div></div></div>';
+  },
+
+  _renderImportUpload:function(){
+    return '<div class="card"><div class="card-body">'+
+      '<div class="form-group"><label>选择导入文件 (JSON格式，支持工单、报价、历史记录</label>'+
+        '<div class="import-upload-area" id="import-upload-area" onclick="document.getElementById(\'import-file-input\').click()">'+
+          '<div class="upload-icon">📁</div>'+
+          '<div class="upload-text">点击或拖拽 JSON 文件到此处</div>'+
+          '<div class="upload-hint">支持导入格式：{ orders[], quotes[], history[]</div>'+
+        '</div>'+
+        '<input type="file" id="import-file-input" accept=".json" style="display:none" onchange="window.AppImportHandleFile(event)">'+
+      '</div>'+
+      '<div class="form-row">'+
+        '<div class="form-group"><label>处理人</label><input type="text" id="import-handler" placeholder="请输入处理人姓名"></div>'+
+        '<div class="form-group"><label>操作备注</label><input type="text" id="import-note" placeholder="可选，如：批量导入6月份数据"></div>'+
+      '</div>'+
+      '<div id="import-precheck-result"></div>'+
+      '<div id="import-action-buttons" style="display:none;margin-top:16px">'+
+        '<button class="btn btn-primary" onclick="window.AppImportConfirm()">✅ 确认导入</button>'+
+        '<button class="btn" onclick="window.AppImportCancel()">取消</button>'+
+      '</div>'+
+    '</div></div>';
+  },
+
+  _renderImportTaskDetail:function(taskId){
+    var self=this;
+    var task=Store.getImportTaskById(taskId);
+    if(!task){return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">❌</div><p>任务不存在</p></div></div></div>';}
+    var statusBadge=this._getImportStatusBadge(task.status);
+    var dataTypes=task.dataTypes.map(function(dt){return self._getImportDataTypeLabel(dt)}).join('、');
+    var totalImported=task.result?(task.result.imported.orders+task.result.imported.quotes+task.result.imported.history):0;
+    var totalSkipped=task.result?(task.result.skipped.orders+task.result.skipped.quotes+task.result.skipped.history):0;
+    var canRollback=task.status!==IMPORT_TASK_STATUS.ROLLED_BACK&&task.status!==IMPORT_TASK_STATUS.PRECHECK&&task.status!==IMPORT_TASK_STATUS.PENDING&&task.status!==IMPORT_TASK_STATUS.PROCESSING;
+    var summaryHtml='<div class="detail-grid">'+
+      '<div class="detail-item"><span class="detail-label">任务ID</span><span class="detail-value">'+task.id+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">来源文件</span><span class="detail-value">'+esc(task.source)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">文件大小</span><span class="detail-value">'+(task.sourceSize?(task.sourceSize/1024).toFixed(2)+' KB':'-')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">数据类型</span><span class="detail-value">'+dataTypes+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">状态</span><span class="detail-value">'+statusBadge+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">处理人</span><span class="detail-value">'+esc(task.handler||'-')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">创建时间</span><span class="detail-value">'+formatDateTime(task.createdAt)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">开始时间</span><span class="detail-value">'+formatDateTime(task.startedAt)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">完成时间</span><span class="detail-value">'+formatDateTime(task.finishedAt)+'</span></div>'+
+      (task.note?'<div class="detail-item"><span class="detail-label">备注</span><span class="detail-value">'+esc(task.note)+'</span></div>':'')+
+      (task.rollbackInfo?'<div class="detail-item"><span class="detail-label">回滚信息</span><span class="detail-value">'+esc(task.rollbackInfo.handler)+' · '+formatDateTime(task.rollbackInfo.rolledBackAt)+' · '+esc(task.rollbackInfo.reason)+'</span></div>':'')+
+    '</div>';
+    var resultHtml='';
+    if(task.result){
+      resultHtml='<div class="detail-section"><h4>📊 导入结果</h4><div class="detail-grid">'+
+        '<div class="detail-item"><span class="detail-label">工单导入</span><span class="detail-value">'+task.result.imported.orders+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">工单跳过</span><span class="detail-value">'+task.result.skipped.orders+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">报价导入</span><span class="detail-value">'+task.result.imported.quotes+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">报价跳过</span><span class="detail-value">'+task.result.skipped.quotes+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">历史导入</span><span class="detail-value">'+task.result.imported.history+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">历史跳过</span><span class="detail-value">'+task.result.skipped.history+'</span></div>'+
+      '</div></div>';
+    }
+    var conflictsHtml='';
+    if(task.conflicts&&task.conflicts.length>0){
+      conflictsHtml='<div class="detail-section"><h4>⚠️ 冲突项 ('+task.conflicts.length+')</h4><div class="table-wrap"><table>'+
+        '<thead><tr><th>类型</th><th>严重程度</th><th>项目</th><th>说明</th></tr></thead><tbody>'+
+        task.conflicts.map(function(c){
+          var typeLabel=self._getImportConflictTypeLabel(c.type);
+          var sevClass=c.severity==='error'?'<span class="badge badge-terminated">错误</span>':'<span class="badge badge-quoted">警告</span>';
+          return '<tr><td>'+typeLabel+'</td><td>'+sevClass+'</td><td>'+esc(c.itemName||c.itemId)+'</td><td>'+esc(c.message)+'</td></tr>';
+        }).join('')+
+      '</tbody></table></div></div>';
+    }
+    var actionHtml='<div class="action-bar">'+
+      '<button class="btn" onclick="window.AppImportBackToList()">← 返回列表</button>'+
+      (canRollback?'<button class="btn btn-warning" onclick="window.AppImportShowRollbackModal(\''+taskId+'\')">↩ 回滚</button>':'')+
+      (task.result?'<button class="btn btn-primary" onclick="window.AppImportExportResult(\''+taskId+'\')">📥 导出处理结果</button>':'')+
+    '</div>';
+    var termHtml='';
+    if(task.status===IMPORT_TASK_STATUS.ROLLED_BACK){termHtml='<div class="alert alert-warning">⚠️ 此任务已回滚，所有导入的数据已撤销</div>';}
+    return actionHtml+termHtml+
+      '<div class="detail-section"><h4>📋 任务信息</h4>'+summaryHtml+'</div>'+resultHtml+conflictsHtml;
+  },
+
+  _getImportStatusLabel:function(status){
+    var labels={};
+    labels[IMPORT_TASK_STATUS.PRECHECK]='预检中';
+    labels[IMPORT_TASK_STATUS.PENDING]='待处理';
+    labels[IMPORT_TASK_STATUS.PROCESSING]='处理中';
+    labels[IMPORT_TASK_STATUS.PARTIAL]='部分成功';
+    labels[IMPORT_TASK_STATUS.COMPLETED]='全部成功';
+    labels[IMPORT_TASK_STATUS.FAILED]='全部失败';
+    labels[IMPORT_TASK_STATUS.ROLLED_BACK]='已回滚';
+    return labels[status]||status;
+  },
+
+  _getImportStatusBadge:function(status){
+    var classes={};
+    classes[IMPORT_TASK_STATUS.PRECHECK]='badge-inspecting';
+    classes[IMPORT_TASK_STATUS.PENDING]='badge-registered';
+    classes[IMPORT_TASK_STATUS.PROCESSING]='badge-inspecting';
+    classes[IMPORT_TASK_STATUS.PARTIAL]='badge-quoted';
+    classes[IMPORT_TASK_STATUS.COMPLETED]='badge-completed';
+    classes[IMPORT_TASK_STATUS.FAILED]='badge-terminated';
+    classes[IMPORT_TASK_STATUS.ROLLED_BACK]='badge-terminated';
+    return '<span class="badge '+(classes[status]||'')+'">'+this._getImportStatusLabel(status)+'</span>';
+  },
+
+  _getImportDataTypeLabel:function(type){
+    var labels={};
+    labels[IMPORT_DATA_TYPES.ORDERS]='工单';
+    labels[IMPORT_DATA_TYPES.QUOTES]='报价';
+    labels[IMPORT_DATA_TYPES.HISTORY]='历史记录';
+    return labels[type]||type;
+  },
+
+  _getImportConflictTypeLabel:function(type){
+    var labels={};
+    labels[IMPORT_CONFLICT_TYPES.DUPLICATE]='重复数据';
+    labels[IMPORT_CONFLICT_TYPES.VERSION_MISMATCH]='版本不一致';
+    labels[IMPORT_CONFLICT_TYPES.MISSING_FIELDS]='缺少字段';
+    labels[IMPORT_CONFLICT_TYPES.PERMISSION]='权限/关联';
+    return labels[type]||type;
+  },
+
+  _applyImportFilters:function(){
+    var el=document.getElementById('import-audit-content');
+    if(el)el.innerHTML=this._renderImportTaskList();
+  },
+
+  _saveImportState:function(){
+    ImportAuditEngine.saveCurrentState({
+      currentTab:this._importCurrentTab,
+      filters:this._importFilters,
+      selectedTaskId:this._importSelectedTaskId,
+      savedAt:now()
+    });
   }
 };
 
@@ -987,6 +1704,153 @@ var SampleData={
   }
 };
 
+function importHandleFile(event){
+  var file=event.target.files[0];if(!file)return;
+  showToast('正在解析文件...','info');
+  ImportAuditEngine._parseFile(file).then(function(parsedData){
+    return ImportAuditEngine.precheck(parsedData);
+  }).then(function(precheckResult){
+    UI._importPrecheckResult=precheckResult;
+    var el=document.getElementById('import-precheck-result');
+    var dataTypes=precheckResult.dataTypes.map(function(dt){return UI._getImportDataTypeLabel(dt)}).join('、');
+    var stats=precheckResult.stats;
+    var totalValid=stats.orders.valid+stats.quotes.valid+stats.history.valid;
+    var totalConflicts=stats.orders.conflicts+stats.quotes.conflicts+stats.history.conflicts;
+    var totalErrors=stats.orders.errors+stats.quotes.errors+stats.history.errors;
+    var statusClass=precheckResult.canImport?'alert-info':'alert-error';
+    var conflictsHtml='';
+    if(precheckResult.conflicts.length>0){
+      conflictsHtml='<div style="margin-top:12px"><div class="section-title">冲突详情 ('+precheckResult.conflicts.length+')</div><div class="table-wrap"><table>'+
+        '<thead><tr><th>类型</th><th>严重程度</th><th>项目</th><th>说明</th></tr></thead><tbody>'+
+        precheckResult.conflicts.map(function(c){
+          var typeLabel=UI._getImportConflictTypeLabel(c.type);
+          var sevClass=c.severity==='error'?'<span class="badge badge-terminated">错误</span>':'<span class="badge badge-quoted">警告</span>';
+          return '<tr><td>'+typeLabel+'</td><td>'+sevClass+'</td><td>'+esc(c.itemName||c.itemId)+'</td><td>'+esc(c.message)+'</td></tr>';
+        }).join('')+
+      '</tbody></table></div></div>';
+    }
+    el.innerHTML='<div class="alert '+statusClass+'">'+
+      '<strong>预检结果：</strong>'+
+      '数据类型：'+dataTypes+' | '+
+      '总计 '+stats.totalItems+' 条，可导入 '+totalValid+' 条，'+
+      '冲突 '+totalConflicts+' 条，错误 '+totalErrors+' 条'+
+      (precheckResult.canImport?'<br>✅ 可以执行导入，冲突项将自动跳过，不覆盖旧记录':'<br>❌ 存在错误，无法执行导入，请修复数据后重试')+
+      '</div>'+
+      '<div class="detail-grid">'+
+        '<div class="detail-item"><span class="detail-label">工单</span><span class="detail-value">总计 '+stats.orders.total+'，可导入 '+stats.orders.valid+'，冲突 '+stats.orders.conflicts+'，错误 '+stats.orders.errors+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">报价</span><span class="detail-value">总计 '+stats.quotes.total+'，可导入 '+stats.quotes.valid+'，冲突 '+stats.quotes.conflicts+'，错误 '+stats.quotes.errors+'</span></div>'+
+        '<div class="detail-item"><span class="detail-label">历史记录</span><span class="detail-value">总计 '+stats.history.total+'，可导入 '+stats.history.valid+'，冲突 '+stats.history.conflicts+'，错误 '+stats.history.errors+'</span></div>'+
+      '</div>'+conflictsHtml;
+    if(precheckResult.canImport){
+      document.getElementById('import-action-buttons').style.display='block';
+    }else{
+      document.getElementById('import-action-buttons').style.display='none';
+    }
+    showToast('预检完成','success');
+  }).catch(function(err){
+    showToast('预检失败：'+err.message,'error');
+  });
+  event.target.value='';
+}
+
+function importConfirm(){
+  var handler=document.getElementById('import-handler').value.trim();
+  var note=document.getElementById('import-note').value.trim();
+  if(!UI._importPrecheckResult){showToast('请先上传文件并完成预检','error');return;}
+  var task=ImportAuditEngine.createTask(UI._importPrecheckResult,handler,note);
+  showToast('任务创建成功，正在执行导入...','info');
+  ImportAuditEngine.executeImport(task.id).then(function(result){
+    if(result.ok){
+      var totalImported=result.task.result?(result.task.result.imported.orders+result.task.result.imported.quotes+result.task.result.imported.history):0;
+      var totalSkipped=result.task.result?(result.task.result.skipped.orders+result.task.result.skipped.quotes+result.task.result.skipped.history):0;
+      showToast('导入完成！成功 '+totalImported+' 条，跳过 '+totalSkipped+' 条','success');
+      UI._importPrecheckResult=null;
+      UI._importCurrentTab='list';
+      UI._saveImportState();
+      UI.renderImportAudit();
+    }else{
+      showToast('导入失败：'+result.msg,'error');
+    }
+  });
+}
+
+function importCancel(){
+  UI._importPrecheckResult=null;
+  document.getElementById('import-precheck-result').innerHTML='';
+  document.getElementById('import-action-buttons').style.display='none';
+  document.getElementById('import-handler').value='';
+  document.getElementById('import-note').value='';
+  showToast('已取消','info');
+}
+
+function importSwitchTab(tab){
+  UI._importCurrentTab=tab;
+  UI._importSelectedTaskId=null;
+  UI._saveImportState();
+  UI.renderImportAudit();
+}
+
+function importViewDetail(taskId){
+  UI._importCurrentTab='detail';
+  UI._importSelectedTaskId=taskId;
+  UI._saveImportState();
+  UI.renderImportAudit();
+}
+
+function importBackToList(){
+  UI._importCurrentTab='list';
+  UI._importSelectedTaskId=null;
+  UI._saveImportState();
+  UI.renderImportAudit();
+}
+
+function importFilterChange(){
+  UI._importFilters.status=document.getElementById('import-filter-status').value;
+  UI._importFilters.source=document.getElementById('import-filter-source').value.trim();
+  UI._importFilters.handler=document.getElementById('import-filter-handler').value.trim();
+  UI._saveImportState();
+  UI._applyImportFilters();
+}
+
+function importClearFilters(){
+  UI._importFilters={status:'',source:'',handler:''};
+  UI._saveImportState();
+  UI.renderImportAudit();
+}
+
+function importShowRollbackModal(taskId){
+  var task=Store.getImportTaskById(taskId);
+  if(!task)return;
+  var bodyHtml='<div class="alert alert-warning">⚠️ 此操作将撤销本次导入的所有数据，回滚到导入前的状态。</div>'+
+    '<div class="form-group"><label>处理人</label><input type="text" id="m-rollback-handler" value="'+esc(task.handler||'')+'"></div>'+
+    '<div class="form-group"><label>回滚原因 *</label><textarea id="m-rollback-reason" placeholder="请填写回滚原因"></textarea></div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-warning" onclick="window.AppImportDoRollback(\''+taskId+'\')">确认回滚</button>';
+  showModal('回滚导入',bodyHtml,footerHtml);
+}
+
+function importDoRollback(taskId){
+  var handler=document.getElementById('m-rollback-handler').value.trim();
+  var reason=document.getElementById('m-rollback-reason').value.trim();
+  if(!reason){showToast('请填写回滚原因','error');return;}
+  ImportAuditEngine.rollback(taskId,handler,reason).then(function(result){
+    if(result.ok){
+      closeModal();
+      showToast('回滚成功，数据已恢复到导入前状态','success');
+      UI.renderImportAudit();
+    }else{
+      showToast('回滚失败：'+result.msg,'error');
+    }
+  });
+}
+
+function importExportResult(taskId){
+  var exportData=ImportAuditEngine.exportResult(taskId);
+  if(!exportData){showToast('导出失败：任务不存在','error');return;}
+  var filename='import-result-'+taskId+'-'+formatDate(now()).replace(/-/g,'')+'.json';
+  downloadFile(JSON.stringify(exportData,null,2),filename,'application/json');
+  showToast('处理结果已导出','success');
+}
+
 window.AppNavigate=navigateTo;
 window.AppCloseModal=closeModal;
 window.AppSubmitOrder=submitOrder;
@@ -1015,6 +1879,17 @@ window.AppFilterHistory=filterHistory;
 window.AppExportJSON=exportJSON;
 window.AppExportCSV=exportCSV;
 window.AppImportJSON=importJSON;
+window.AppImportHandleFile=importHandleFile;
+window.AppImportConfirm=importConfirm;
+window.AppImportCancel=importCancel;
+window.AppImportSwitchTab=importSwitchTab;
+window.AppImportViewDetail=importViewDetail;
+window.AppImportBackToList=importBackToList;
+window.AppImportFilterChange=importFilterChange;
+window.AppImportClearFilters=importClearFilters;
+window.AppImportShowRollbackModal=importShowRollbackModal;
+window.AppImportDoRollback=importDoRollback;
+window.AppImportExportResult=importExportResult;
 
 window.CRP={STATUS:STATUS,STATUS_LABELS:STATUS_LABELS,STORAGE_KEYS:STORAGE_KEYS,Store:Store,QuoteEngine:QuoteEngine,StatusEngine:StatusEngine,Validator:Validator,renderQuoteTable:renderQuoteTable,now:now,uuid:uuid,SampleData:SampleData};
 
