@@ -9,6 +9,17 @@
 import json
 import sys
 
+# 修复 Windows 终端 GBK 编码报错（输出 emoji/中文会 UnicodeEncodeError）
+if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+    # 双重保险：IO 重定向或老 Python 时 fallback
+    import io
+    if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding.lower().replace('-', '') != 'utf8':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
 # ===== 从 app.js 提取的等价业务逻辑（关键修复点）=====
 
 STATUS = {

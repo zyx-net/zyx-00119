@@ -29,7 +29,8 @@ global.document = {
   querySelector: () => null,
   addEventListener: () => {}
 };
-global.window = {};
+global.window = global;
+global.window.CRP = null;
 
 // ========== 加载 app.js ==========
 const appCode = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
@@ -39,11 +40,13 @@ try {
   console.log('⚠️  app.js 中 DOM 相关报错忽略（因为运行在Node环境），业务逻辑已加载:', e.message.split('\n')[0]);
 }
 
-// 从 vm 上下文拿业务对象（通过全局变量访问）
-const STATUS = global.STATUS || eval('(typeof STATUS!=="undefined"?STATUS:null)');
-const Store = global.Store || eval('(typeof Store!=="undefined"?Store:null)');
-const QuoteEngine = global.QuoteEngine || eval('(typeof QuoteEngine!=="undefined"?QuoteEngine:null)');
-const STORAGE_KEYS = global.STORAGE_KEYS || eval('(typeof STORAGE_KEYS!=="undefined"?STORAGE_KEYS:null)');
+// 从 vm 上下文拿业务对象（通过 window.CRP 全局暴露）
+const CRP = global.CRP || global.window.CRP || {};
+const STATUS = CRP.STATUS;
+const Store = CRP.Store;
+const QuoteEngine = CRP.QuoteEngine;
+const STORAGE_KEYS = CRP.STORAGE_KEYS;
+const now = CRP.now;
 
 // ========== 工具函数 ==========
 const TEST_PREFIX = 'crp_autotest_';

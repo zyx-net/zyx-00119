@@ -55,6 +55,7 @@ code{background:#e2e8f0;padding:2px 6px;border-radius:3px;font-family:Consolas,m
 
 <script src="app.js"></script>
 <script>
+var CRP=window.CRP;var STATUS=CRP.STATUS;var STORAGE_KEYS=CRP.STORAGE_KEYS;var Store=CRP.Store;var QuoteEngine=CRP.QuoteEngine;var now=CRP.now;
 var TP='crp_test_';var OK={};
 function log(m,c){var t=new Date().toLocaleTimeString();var x=c?' class="'+c+'"':'';document.getElementById('log-box').innerHTML+='<span'+x+'>['+t+'] '+m+'</span>\n';document.getElementById('log-box').scrollTop=1e9}
 function swap(u){var K=['ORDERS','PARTS','LABOR','QUOTES','HISTORY','ROLLBACKS','TERMINATIONS','INITIALIZED'];K.forEach(function(k){if(u){OK[k]=STORAGE_KEYS[k];STORAGE_KEYS[k]=TP+k.toLowerCase()}else if(OK[k])STORAGE_KEYS[k]=OK[k]})}

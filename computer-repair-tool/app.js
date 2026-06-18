@@ -1016,6 +1016,8 @@ window.AppExportJSON=exportJSON;
 window.AppExportCSV=exportCSV;
 window.AppImportJSON=importJSON;
 
+window.CRP={STATUS:STATUS,STATUS_LABELS:STATUS_LABELS,STORAGE_KEYS:STORAGE_KEYS,Store:Store,QuoteEngine:QuoteEngine,StatusEngine:StatusEngine,Validator:Validator,renderQuoteTable:renderQuoteTable,now:now,uuid:uuid,SampleData:SampleData};
+
 document.addEventListener('DOMContentLoaded',function(){
   SampleData.initialize();
   navigateTo('dashboard');
