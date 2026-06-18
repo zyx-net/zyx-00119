@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>导入准入与回放台 - 回归测试</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #1a1d23; color: #e0e0e0; padding: 24px; }
+    h1 { font-size: 22px; margin-bottom: 16px; color: #4fc3f7; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    .card { background: #242830; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+    .summary-row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .stat { flex: 1; min-width: 120px; background: #2d323c; border-radius: 6px; padding: 14px; text-align: center; }
+    .stat-num { font-size: 28px; font-weight: bold; }
+    .stat-label { font-size: 12px; color: #888; margin-top: 4px; }
+    .num-pass { color: #4caf50; }
+    .num-fail { color: #ef5350; }
+    .num-total { color: #4fc3f7; }
+    .btn { background: #4fc3f7; color: #1a1d23; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px; }
+    .btn:hover { background: #81d4fa; }
+    .test-list { margin-top: 12px; }
+    .test-item { padding: 8px 12px; border-radius: 4px; margin-bottom: 4px; font-family: Consolas, monospace; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+    .test-pass { background: rgba(76,175,80,0.1); color: #81c784; }
+    .test-fail { background: rgba(239,83,80,0.1); color: #e57373; }
+    .test-error { color: #ffb74d; margin-left: 20px; font-size: 12px; padding: 4px 0; }
+    .icon { width: 16px; display: inline-block; }
+    .module-title { color: #ffb74d; font-size: 14px; margin: 16px 0 8px; padding-bottom: 4px; border-bottom: 1px solid #3a3f4b; }
+    #output { background: #0f1115; padding: 16px; border-radius: 6px; font-family: Consolas, monospace; font-size: 12px; max-height: 400px; overflow-y: auto; white-space: pre-wrap; }
+    .log-info { color: #90caf9; }
+    .log-pass { color: #81c784; }
+    .log-fail { color: #e57373; }
+    .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .status { font-size: 13px; color: #888; }
+    .banner { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+    .banner-pass { background: rgba(76,175,80,0.15); border: 1px solid rgba(76,175,80,0.3); color: #81c784; }
+    .banner-fail { background: rgba(239,83,80,0.15); border: 1px solid rgba(239,83,80,0.3); color: #e57373; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🛡️ 导入准入与回放台 - 回归测试</h1>
+
+    <div id="banner"></div>
+
+    <div class="card">
+      <div class="header-row">
+        <div class="status" id="status">准备就绪，点击运行测试</div>
+        <button class="btn" onclick="startTests()">▶ 运行全部测试</button>
+      </div>
+      <div class="summary-row">
+        <div class="stat">
+          <div class="stat-num num-total" id="num-total">0</div>
+          <div class="stat-label">总用例</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num num-pass" id="num-pass">0</div>
+          <div class="stat-label">通过</div>
+        </div>
+        <div class="stat">
+          <div class="stat-num num-fail" id="num-fail">0</div>
+          <div class="stat-label">失败</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div id="test-list"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-bottom: 12px; color: #90caf9;">控制台输出</h3>
+      <div id="output"></div>
+    </div>
+  </div>
+
+  <script>
+    var origLog = console.log.bind(console);
+    var logs = [];
+    console.log = function() {
+      var msg = Array.prototype.slice.call(arguments).map(function(a){
+        if (typeof a === 'object') try { return JSON.stringify(a); } catch(e){ return String(a); }
+        return String(a);
+      }).join(' ');
+      logs.push(msg);
+      origLog.apply(console, arguments);
+    };
+
+    function renderLogs() {
+      var el = document.getElementById('output');
+      el.innerHTML = logs.map(function(l) {
+        var cls = 'log-info';
+        if (l.indexOf('✅') > -1 || l.indexOf('PASS') > -1) cls = 'log-pass';
+        if (l.indexOf('❌') > -1 || l.indexOf('FAIL') > -1) cls = 'log-fail';
+        return '<div class="' + cls + '">' + l.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</div>';
+      }).join('');
+      el.scrollTop = el.scrollHeight;
+    }
+    setInterval(renderLogs, 200);
+  </script>
+
+  <script src="app.js"></script>
+  <script src="test-import-gate.js"></script>
+
+  <script>
+    function startTests() {
+      document.getElementById('status').textContent = '正在执行测试...';
+      document.getElementById('test-list').innerHTML = '';
+      document.getElementById('banner').innerHTML = '';
+      logs = [];
+
+      window.TestImportGate.runAllTests();
+
+      setTimeout(function() {
+        var result = window.TEST_RESULT;
+        if (!result) {
+          setTimeout(function() {
+            var r = window.TEST_RESULT || window.TestImportGate.TestRunner.getSummary();
+            renderResult(r);
+          }, 800);
+        } else {
+          renderResult(result);
+        }
+      }, 1500);
+    }
+
+    function renderResult(result) {
+      if (!result) {
+        document.getElementById('status').textContent = '测试结果读取失败，请查看控制台';
+        return;
+      }
+
+      document.getElementById('num-total').textContent = result.total;
+      document.getElementById('num-pass').textContent = result.passed;
+      document.getElementById('num-fail').textContent = result.failed;
+
+      var banner = document.getElementById('banner');
+      if (result.failed === 0) {
+        banner.innerHTML = '<div class="banner banner-pass">🎉 全部测试通过（' + result.passed + '/' + result.total + '），通过率 ' + result.passRate + '%</div>';
+      } else {
+        banner.innerHTML = '<div class="banner banner-fail">⚠️ 存在失败用例（' + result.failed + '/' + result.total + '），请查看下方详情</div>';
+      }
+
+      var tests = window.TestImportGate.TestRunner.getTests();
+      var html = '';
+      var currentModule = '';
+      tests.forEach(function(t) {
+        if (t.module !== currentModule) {
+          currentModule = t.module;
+          html += '<div class="module-title">📦 ' + currentModule + '</div>';
+        }
+        var icon = t.pass ? '<span class="icon">✅</span>' : '<span class="icon">❌</span>';
+        var cls = t.pass ? 'test-pass' : 'test-fail';
+        html += '<div class="test-item ' + cls + '">' + icon + t.name;
+        if (!t.pass && t.error) {
+          html += '<div class="test-error">💥 ' + t.error + '</div>';
+        }
+        html += '</div>';
+      });
+
+      document.getElementById('test-list').innerHTML = html;
+      document.getElementById('status').textContent = '测试完成于 ' + new Date().toLocaleString();
+    }
+
+    window.onload = function() {
+      console.log('🛡️ 导入准入与回放台 - 回归测试已就绪');
+      console.log('点击「▶ 运行全部测试」或调用 TestImportGate.runAllTests() 开始');
+    };
+  </script>
+</body>
+</html>
