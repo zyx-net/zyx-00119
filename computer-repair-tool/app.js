@@ -663,10 +663,10 @@ function showQuoteModal(orderId){
   var epHtml='';var elHtml='';
   if(latestQuote){
     latestQuote.parts.forEach(function(p){
-      epHtml+='<div class="quote-item-row" data-type="part"><select class="q-part-select" onchange="window.AppQuotePartChange(this)"><option value="">选择配件</option>'+partsOpts+'</select><input type="number" class="q-part-price" placeholder="单价" step="0.01" min="0" value="'+p.unitPrice+'"><input type="number" class="q-part-qty" placeholder="数量" min="1" value="'+p.quantity+'" oninput="window.AppQuoteCalcLine(this)"><input type="number" class="q-part-subtotal" placeholder="小计" step="0.01" value="'+p.subtotal+'" readonly><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove();window.AppRecalcQuoteTotal()">✕</button></div>';
+      epHtml+='<div class="quote-item-row" data-type="part"><select class="q-part-select" onchange="window.AppQuotePartChange(this)"><option value="">选择配件</option>'+partsOpts+'</select><input type="number" class="q-part-price" placeholder="单价" step="0.01" min="0" readonly value="'+p.unitPrice+'"><input type="number" class="q-part-qty" placeholder="数量" min="1" value="'+p.quantity+'" oninput="window.AppQuoteCalcLine(this)"><input type="number" class="q-part-subtotal" placeholder="小计" step="0.01" value="'+p.subtotal+'" readonly><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove();window.AppRecalcQuoteTotal()">✕</button></div>';
     });
     latestQuote.laborItems.forEach(function(l){
-      elHtml+='<div class="labor-item-row" data-type="labor"><select class="q-labor-select" onchange="window.AppQuoteLaborChange(this)"><option value="">选择工时项目</option>'+laborOpts+'</select><input type="number" class="q-labor-fee" placeholder="费用" step="0.01" min="0" value="'+l.fee+'"><input type="text" class="q-labor-note" placeholder="备注" value=""><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove();window.AppRecalcQuoteTotal()">✕</button></div>';
+      elHtml+='<div class="labor-item-row" data-type="labor"><select class="q-labor-select" onchange="window.AppQuoteLaborChange(this)"><option value="">选择工时项目</option>'+laborOpts+'</select><input type="number" class="q-labor-fee" placeholder="费用" step="0.01" min="0" readonly value="'+l.fee+'"><input type="text" class="q-labor-note" placeholder="备注" value=""><button class="btn btn-sm btn-danger" onclick="this.parentElement.remove();window.AppRecalcQuoteTotal()">✕</button></div>';
     });
   }
 
