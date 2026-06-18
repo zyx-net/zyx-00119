@@ -345,6 +345,13 @@ function verifyImport(filepath) {
     console.log('   ⚠️  版本冲突: ' + report.conflicts + ' 条');
     console.log('   ❌ 数据无效: ' + report.invalid + ' 条');
 
+    if (report.importedIds && report.importedIds.length > 0) {
+      console.log('\n✅ 已导入 runId: ' + report.importedIds.join(', '));
+    }
+    if (report.skippedIds && report.skippedIds.length > 0) {
+      console.log('\n⏭️  已跳过（不覆盖旧记录）runId: ' + report.skippedIds.join(', '));
+    }
+
     if (report.errors.length) {
       console.log('\n📝 详细信息:');
       report.errors.forEach(e => console.log('   - ' + e));
@@ -357,6 +364,8 @@ function verifyImport(filepath) {
     });
 
     console.log('\n✅ 导入验证完成');
+    console.log('ℹ️  冲突时保留历史版本，不覆盖旧记录');
+    console.log('ℹ️  日志和撤销痕迹与结果一起保留');
     process.exit(report.invalid > 0 ? 1 : 0);
 
   } catch(e) {

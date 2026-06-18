@@ -414,11 +414,26 @@ function markTestRunning(tcId) {
   });
 }
 
+var currentStepIndex = 0;
+var currentTestCaseSteps = [];
+
 function assertEq(actual, expected, msg) {
+  currentStepIndex++;
+  var stepInfo = '步骤' + currentStepIndex + ': ' + msg + ' — 期望: ' + expected + ', 实际: ' + actual;
+  currentTestCaseSteps.push(stepInfo);
+
   if (actual !== expected) {
-    throw new Error(msg + ' — 期望: ' + expected + ', 实际: ' + actual);
+    var error = new Error(msg + ' — 期望: ' + expected + ', 实际: ' + actual);
+    error.steps = currentTestCaseSteps.slice();
+    error.failedStep = currentStepIndex;
+    throw error;
   }
   log('  ✅ ' + msg + ': ' + actual, 'pass');
+}
+
+function resetStepCounter() {
+  currentStepIndex = 0;
+  currentTestCaseSteps = [];
 }
 
 function runAllTests() {
@@ -461,12 +476,17 @@ function runAllTests() {
     log('\n🧪 ' + item.id + ': ' + tc.name, 'highlight');
 
     try {
+      resetStepCounter();
       item.fn();
       var result = ResultManager.addResult(currentRun, tc, true, '通过');
       results.push(result);
     } catch(e) {
       log('  ❌ 失败: ' + e.message, 'fail');
-      var result = ResultManager.addResult(currentRun, tc, false, e.message);
+      var detail = e.message;
+      if (e.steps && e.steps.length > 0) {
+        detail = '失败于步骤' + e.failedStep + ' | ' + e.message + ' | 执行步骤: ' + e.steps.join(' → ');
+      }
+      var result = ResultManager.addResult(currentRun, tc, false, detail);
       results.push(result);
     }
 
@@ -490,16 +510,21 @@ function finishAllTests() {
     log('\n⚠️ 结果保存失败: ' + saveResult.error, 'fail');
   }
 
+  ResultManager.saveCurrentState(currentRun, 'run');
+
   updateSummary(currentRun);
   renderFailures();
   renderHistory();
   populateCompareSelects();
+  checkRecovery();
 
   log('\n========================================', 'warn');
   log('测试完成: ' + currentRun.passed + ' 通过, ' + currentRun.failed + ' 失败',
       currentRun.failed === 0 ? 'pass' : 'fail');
   if (currentRun.failed === 0) {
     log('✅ 报价改价逻辑修复正确！历史版本保持原价，新版本使用最新价，历史记录完整。', 'pass');
+  } else {
+    log('💡 点击「失败明细」标签页查看具体失败步骤', 'warn');
   }
 
   swapStorageKeys(false);
@@ -746,20 +771,56 @@ function renderFailures() {
     return;
   }
 
-  var failures = currentRun.results.filter(function(r) { return !r.pass; });
+  var failures = ResultManager.getFailedCasesWithSteps(currentRun);
   if (failures.length === 0) {
     el.innerHTML = '<div class="alert success">🎉 暂无失败用例，全部通过！</div>';
     return;
   }
 
-  var html = '<p style="font-size:13px;color:#64748b;margin-bottom:12px">共 ' + failures.length + ' 个失败用例</p>';
-  failures.forEach(function(f) {
-    html += '<div class="failure-item">';
-    html += '<div class="f-title">' + f.id + ' ' + f.name + '</div>';
+  var html = '<div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:16px">' +
+    '<div class="stat-card"><div class="stat-value">' + currentRun.total + '</div><div class="stat-label">总用例</div></div>' +
+    '<div class="stat-card pass"><div class="stat-value">' + currentRun.passed + '</div><div class="stat-label">通过</div></div>' +
+    '<div class="stat-card fail"><div class="stat-value">' + currentRun.failed + '</div><div class="stat-label">失败</div></div>' +
+    '<div class="stat-card"><div class="stat-value">' + Math.round(currentRun.passed / currentRun.total * 100) + '%</div><div class="stat-label">通过率</div></div>' +
+    '</div>';
+
+  html += '<p style="font-size:13px;color:#64748b;margin-bottom:12px">共 ' + failures.length + ' 个失败用例，点击展开查看具体步骤</p>';
+  failures.forEach(function(f, idx) {
+    html += '<div class="failure-item" onclick="toggleFailureDetail(' + idx + ')" style="cursor:pointer">';
+    html += '<div class="f-title" style="display:flex;align-items:center;justify-content:space-between">' +
+      '<span>' + f.id + ' ' + f.name + ' <span class="badge info" style="margin-left:8px">' + f.category + '</span></span>' +
+      '<span id="failure-toggle-' + idx + '" style="font-size:12px">▼</span>' +
+      '</div>';
     html += '<div class="f-detail">' + escapeHtml(f.detail || '无详情') + '</div>';
+    if (f.steps && f.steps.length > 0) {
+      html += '<div id="failure-steps-' + idx + '" style="display:none;margin-top:10px;padding-top:10px;border-top:1px dashed #fca5a5">';
+      html += '<div style="font-weight:600;font-size:12px;color:#991b1b;margin-bottom:6px">🔍 失败步骤追踪：</div>';
+      html += '<ol style="margin-left:20px;font-size:12px;color:#7f1d1d;line-height:1.8">';
+      f.steps.forEach(function(step) {
+        html += '<li>' + escapeHtml(step) + '</li>';
+      });
+      html += '</ol></div>';
+    }
+    if (f.timestamp) {
+      html += '<div style="margin-top:8px;font-size:11px;color:#b91c1c;opacity:0.8">⏱ 失败时间: ' + formatDateTime(f.timestamp) + '</div>';
+    }
     html += '</div>';
   });
   el.innerHTML = html;
+}
+
+function toggleFailureDetail(idx) {
+  var stepsEl = document.getElementById('failure-steps-' + idx);
+  var toggleEl = document.getElementById('failure-toggle-' + idx);
+  if (stepsEl) {
+    if (stepsEl.style.display === 'none') {
+      stepsEl.style.display = 'block';
+      toggleEl.textContent = '▲';
+    } else {
+      stepsEl.style.display = 'none';
+      toggleEl.textContent = '▼';
+    }
+  }
 }
 
 function renderHistory() {
@@ -904,30 +965,56 @@ function importResults(event) {
       var data = JSON.parse(e.target.result);
       var report = ResultManager.importRuns(data);
 
-      var html = '<div class="alert ' + (report.invalid > 0 ? 'error' : report.conflicts > 0 ? 'warn' : 'success') + '">';
+      var alertClass = 'success';
+      if (report.invalid > 0) alertClass = 'error';
+      else if (report.conflicts > 0) alertClass = 'warn';
+
+      var html = '<div class="alert ' + alertClass + '">';
       html += '<strong>导入完成：</strong>';
-      html += '导入成功 ' + report.imported + ' 条，';
-      html += '重复跳过 ' + report.duplicates + ' 条，';
-      html += '版本冲突 ' + report.conflicts + ' 条，';
-      html += '数据无效 ' + report.invalid + ' 条。';
+      html += '<span style="margin:0 12px">✅ 导入成功: <strong>' + report.imported + '</strong> 条</span>';
+      html += '<span style="margin:0 12px">⏭️ 重复跳过: <strong>' + report.duplicates + '</strong> 条</span>';
+      html += '<span style="margin:0 12px">⚠️ 版本冲突: <strong>' + report.conflicts + '</strong> 条</span>';
+      html += '<span style="margin:0 12px">❌ 数据无效: <strong>' + report.invalid + '</strong> 条</span>';
       html += '</div>';
 
+      if (report.importedIds && report.importedIds.length > 0) {
+        html += '<div style="font-size:12px;color:#065f46;margin-top:8px">';
+        html += '<strong>✅ 已导入 runId：</strong>' + report.importedIds.join(', ');
+        html += '</div>';
+      }
+
+      if (report.skippedIds && report.skippedIds.length > 0) {
+        html += '<div style="font-size:12px;color:#92400e;margin-top:8px">';
+        html += '<strong>⏭️  已跳过（不覆盖旧记录）runId：</strong>' + report.skippedIds.join(', ');
+        html += '</div>';
+      }
+
       if (report.errors.length) {
-        html += '<div style="font-size:12px;color:#64748b;margin-top:8px">';
-        html += '<strong>详情：</strong><ul style="margin:6px 0 0 20px">';
+        html += '<div style="font-size:12px;color:#64748b;margin-top:12px">';
+        html += '<strong>📝 详细信息：</strong><ul style="margin:6px 0 0 20px">';
         report.errors.forEach(function(err) {
           html += '<li>' + escapeHtml(err) + '</li>';
         });
         html += '</ul></div>';
       }
 
+      html += '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">' +
+        '<button class="btn btn-sm" onclick="document.getElementById(\'tab-history\').click()">📋 查看历史记录</button>' +
+        '<button class="btn btn-sm secondary" onclick="document.getElementById(\'import-report\').innerHTML=\'\'">✕ 关闭</button>' +
+        '</div>';
+
       document.getElementById('import-report').innerHTML = html;
       renderHistory();
       populateCompareSelects();
+      checkRecovery();
+
+      log('📥 导入完成: 成功=' + report.imported + ', 重复=' + report.duplicates + ', 冲突=' + report.conflicts + ', 无效=' + report.invalid,
+          report.invalid > 0 ? 'fail' : report.conflicts > 0 ? 'warn' : 'pass');
 
     } catch(err) {
       document.getElementById('import-report').innerHTML =
         '<div class="alert error">导入失败：' + escapeHtml(err.message) + '</div>';
+      log('❌ 导入失败: ' + err.message, 'fail');
     }
   };
   reader.readAsText(file);
@@ -1017,10 +1104,13 @@ function switchTab(tabName) {
   if (tabName === 'history') renderHistory();
   if (tabName === 'compare') populateCompareSelects();
   if (tabName === 'failures') renderFailures();
+
+  ResultManager.saveCurrentState(currentRun, tabName);
 }
 
 function checkRecovery() {
   var latest = ResultManager.getLatestRun();
+  var savedState = ResultManager.loadCurrentState();
   var el = document.getElementById('recovery-banner');
 
   if (!latest) {
@@ -1029,16 +1119,62 @@ function checkRecovery() {
   }
 
   var timeStr = formatDateTime(latest.startedAt);
+  var finishStr = latest.finishedAt ? formatDateTime(latest.finishedAt) : '未完成';
   var statusText = latest.status === 'pass' ? '全部通过' : (latest.failed + ' 个失败');
-  var icon = latest.status === 'pass' ? '✅' : '⚠️';
-  var cls = latest.status === 'pass' ? 'success' : 'warn';
+  var icon = latest.status === 'pass' ? '✅' : (latest.status === 'running' ? '⏳' : '⚠️');
+  var cls = latest.status === 'pass' ? 'success' : (latest.status === 'running' ? 'info' : 'warn');
+
+  var failedCases = ResultManager.getFailedCasesWithSteps(latest);
+  var failureHtml = '';
+  if (failedCases.length > 0) {
+    failureHtml = '<div style="margin-top:8px;font-size:13px;font-weight:400">' +
+      '<strong>失败用例：</strong>' +
+      failedCases.map(function(f) {
+        return '<span class="badge fail" style="margin-right:6px">' + f.id + '</span>';
+      }).join('') +
+      '</div>';
+  }
+
+  var stateInfo = '';
+  if (savedState && savedState.activeTab) {
+    stateInfo = ' · 上次停留于「' + getTabName(savedState.activeTab) + '」';
+  }
 
   el.innerHTML = '<div class="alert ' + cls + '" style="margin-bottom:16px">' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">' +
+    '<div>' +
     icon + ' <strong>检测到上次运行结果：</strong>' +
-    latest.passed + '/' + latest.total + ' 用例通过，' + statusText +
-    ' · 运行于 ' + timeStr +
-    ' · <a href="javascript:void(0)" onclick="loadLatestRun()" style="font-weight:600;color:inherit;text-decoration:underline">加载上次结果</a>' +
+    '<span style="margin:0 8px">' + latest.passed + '/' + latest.total + ' 用例通过，' + statusText + '</span>' +
+    '<span style="opacity:0.8">开始: ' + timeStr + ' · 结束: ' + finishStr + stateInfo + '</span>' +
+    failureHtml +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0">' +
+    '<button class="btn btn-sm ' + (latest.status === 'pass' ? 'success' : 'warning') + '" onclick="loadLatestRun()">📂 加载上次结果</button>' +
+    '<button class="btn btn-sm secondary" onclick="loadLatestRunAndShowFailures()">❌ 查看失败详情</button>' +
+    '<button class="btn btn-sm secondary" onclick="dismissRecoveryBanner()">✕ 关闭</button>' +
+    '</div>' +
+    '</div>' +
     '</div>';
+}
+
+function getTabName(tabKey) {
+  var names = {
+    'run': '执行测试',
+    'history': '历史记录',
+    'compare': '结果对比',
+    'failures': '失败明细',
+    'export': '导入导出'
+  };
+  return names[tabKey] || tabKey;
+}
+
+function dismissRecoveryBanner() {
+  document.getElementById('recovery-banner').innerHTML = '';
+}
+
+function loadLatestRunAndShowFailures() {
+  loadLatestRun();
+  switchTab('failures');
 }
 
 function loadLatestRun() {
@@ -1061,6 +1197,9 @@ function loadLatestRun() {
     });
     logEl.scrollTop = logEl.scrollHeight;
   }
+
+  ResultManager.saveCurrentState(currentRun, 'run');
+  log('📂 已恢复上次运行结果 (runId: ' + latest.runId + ')', 'info');
 
   switchTab('run');
 }
@@ -1090,10 +1229,29 @@ window.onload = function() {
   renderTestList(null);
   updateStats(0, 0, suiteMeta.totalCases);
   updateSummary(null);
+
+  var savedState = ResultManager.loadCurrentState();
+  if (savedState && savedState.activeTab) {
+    log('🔄 检测到上次页面状态，正在恢复...', 'info');
+    switchTab(savedState.activeTab);
+    if (savedState.currentRunId) {
+      var savedRun = ResultManager.getRun(savedState.currentRunId);
+      if (savedRun) {
+        currentRun = savedRun;
+        renderTestList(savedRun.results);
+        updateStats(savedRun.passed, savedRun.failed, savedRun.total);
+        updateSummary(savedRun);
+        renderFailures();
+        log('📂 已恢复上次运行: ' + savedRun.passed + '/' + savedRun.total + ' 通过', 'info');
+      }
+    }
+  }
+
   checkRecovery();
   log('📋 回归测试中心已加载，共 ' + suiteMeta.totalCases + ' 个测试用例。', 'info');
   log('💡 点击「运行全部测试」开始验证，结果会自动保存到本地存储。', 'info');
   log('🔗 命令行脚本（verify-logic.py / test-history-linkage.js）使用相同的用例口径。', 'info');
+  log('🔄 重启或刷新页面后会自动恢复上次运行结果和页面状态。', 'info');
 };
 
 document.getElementById('run-detail-modal').addEventListener('click', function(e) {

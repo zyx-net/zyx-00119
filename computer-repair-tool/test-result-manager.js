@@ -2,8 +2,11 @@
 'use strict';
 
 var STORAGE_KEY = 'crp_test_results';
+var STATE_STORAGE_KEY = 'crp_test_state';
 var EXPORT_FORMAT_VERSION = '2.0.0';
 var MAX_HISTORY = 50;
+var REQUIRED_RESULT_FIELDS = ['runId', 'suiteVersion', 'startedAt', 'total', 'passed', 'failed', 'results'];
+var REQUIRED_CASE_RESULT_FIELDS = ['id', 'name', 'category', 'pass', 'timestamp'];
 
 function uuid() {
   return 'run-' + Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 6);
@@ -64,21 +67,89 @@ var ResultManager = {
 
   _validateRun: function(run) {
     var errors = [];
-    var required = ['runId', 'suiteVersion', 'startedAt', 'total', 'passed', 'failed', 'results'];
-    required.forEach(function(field) {
+    REQUIRED_RESULT_FIELDS.forEach(function(field) {
       if (run[field] === undefined || run[field] === null) {
         errors.push('缺少必填字段: ' + field);
       }
     });
     if (run.results && Array.isArray(run.results)) {
       run.results.forEach(function(r, i) {
-        if (!r.id) errors.push('results[' + i + '] 缺少 id');
-        if (r.pass === undefined) errors.push('results[' + i + '] 缺少 pass 字段');
+        REQUIRED_CASE_RESULT_FIELDS.forEach(function(field) {
+          if (r[field] === undefined || r[field] === null) {
+            errors.push('results[' + i + '] 缺少字段: ' + field);
+          }
+        });
       });
     } else {
       errors.push('results 不是数组或不存在');
     }
+    if (run.logs !== undefined && !Array.isArray(run.logs)) {
+      errors.push('logs 字段格式错误，应为数组');
+    }
+    if (run.env !== undefined && (typeof run.env !== 'object' || run.env === null)) {
+      errors.push('env 字段格式错误，应为对象');
+    }
     return { valid: errors.length === 0, errors: errors };
+  },
+
+  saveCurrentState: function(currentRun, activeTab) {
+    try {
+      var state = {
+        currentRunId: currentRun ? currentRun.runId : null,
+        activeTab: activeTab || 'run',
+        savedAt: now()
+      };
+      this._getStorage().setItem(STATE_STORAGE_KEY, JSON.stringify(state));
+      return true;
+    } catch(e) {
+      console.error('保存状态失败:', e);
+      return false;
+    }
+  },
+
+  loadCurrentState: function() {
+    try {
+      var raw = this._getStorage().getItem(STATE_STORAGE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch(e) {
+      console.error('加载状态失败:', e);
+      return null;
+    }
+  },
+
+  clearCurrentState: function() {
+    try {
+      this._getStorage().removeItem(STATE_STORAGE_KEY);
+      return true;
+    } catch(e) {
+      return false;
+    }
+  },
+
+  getFailedCasesWithSteps: function(run) {
+    if (!run || !run.results) return [];
+    return run.results
+      .filter(function(r) { return !r.pass; })
+      .map(function(r) {
+        var steps = [];
+        if (r.detail) {
+          var stepMatch = r.detail.match(/步骤\s*(\d+)/g);
+          if (stepMatch) {
+            steps = stepMatch;
+          } else {
+            steps = [r.detail];
+          }
+        }
+        return {
+          id: r.id,
+          name: r.name,
+          category: r.category,
+          detail: r.detail,
+          steps: steps,
+          timestamp: r.timestamp
+        };
+      });
   },
 
   createRun: function(suiteMeta) {
@@ -219,7 +290,8 @@ var ResultManager = {
       conflicts: 0,
       invalid: 0,
       errors: [],
-      importedIds: []
+      importedIds: [],
+      skippedIds: []
     };
 
     if (!importData || typeof importData !== 'object') {
@@ -234,9 +306,10 @@ var ResultManager = {
       return report;
     }
 
-    if (importData.formatVersion !== EXPORT_FORMAT_VERSION) {
+    var importedVersion = importData.formatVersion;
+    if (importedVersion !== EXPORT_FORMAT_VERSION) {
       report.conflicts++;
-      report.errors.push('版本警告：导入格式 v' + importData.formatVersion + '，当前 v' + EXPORT_FORMAT_VERSION + '，尝试兼容导入');
+      report.errors.push('版本警告：导入格式 v' + importedVersion + '，当前 v' + EXPORT_FORMAT_VERSION + '，尝试兼容导入');
     }
 
     if (!importData.runs || !Array.isArray(importData.runs)) {
@@ -260,14 +333,33 @@ var ResultManager = {
       if (existingIds[run.runId]) {
         report.duplicates++;
         var existingRun = existingIds[run.runId];
-        var sameResult = existingRun.passed === run.passed &&
-                        existingRun.failed === run.failed &&
-                        existingRun.status === run.status;
+        var sameResult = (existingRun.passed === run.passed &&
+                         existingRun.failed === run.failed &&
+                         existingRun.status === run.status &&
+                         existingRun.suiteVersion === run.suiteVersion);
         if (!sameResult) {
           report.conflicts++;
-          report.errors.push('重复 runId ' + run.runId + ' 结果不一致（已跳过，保留历史版本）');
+          report.errors.push(
+            '版本冲突 runId ' + run.runId + ': ' +
+            '历史=' + existingRun.passed + '/' + existingRun.total + ' ' + existingRun.status + ', ' +
+            '导入=' + run.passed + '/' + run.total + ' ' + run.status + ' ' +
+            '（已跳过，保留历史版本，不覆盖旧记录）'
+          );
         }
+        report.skippedIds.push(run.runId);
         return;
+      }
+
+      if (!run.logs || run.logs.length === 0) {
+        report.errors.push('runId ' + run.runId + ' 警告: 缺少执行日志，将保留空日志');
+      }
+
+      if (run.results) {
+        run.results.forEach(function(r) {
+          if (!r.detail) {
+            r.detail = '无详情';
+          }
+        });
       }
 
       existing.runs.push(run);

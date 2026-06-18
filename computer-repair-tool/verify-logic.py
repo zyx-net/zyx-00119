@@ -26,56 +26,106 @@ if sys.platform == 'win32' and hasattr(sys.stdout, 'reconfigure'):
     if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding.lower().replace('-', '') != 'utf8':
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-# ===== 统一的测试用例定义（与 test-cases.js 完全一致）=====
+# ===== 统一的测试用例定义（与 test-cases.js 完全一致，手动同步）=====
+# 注意：此处定义必须与 test-cases.js 中的 TEST_CASES 和 TEST_SUITE_META 完全一致
+# 每次修改 test-cases.js 后必须同步更新此处
 TEST_CASES = [
-    {'id': 'TC01', 'name': '生成版本1报价', 'category': '报价生成',
-     'description': '检测中状态工单生成首次报价，验证金额计算和状态流转',
-     'expected': {'version': 1, 'totalCost': 250, 'partsCount': 1, 'laborCount': 1},
-     'priority': 'high'},
-    {'id': 'TC02', 'name': '修改配置价格', 'category': '价格配置',
-     'description': '修改配件单价和工时费用，验证配置更新不影响历史快照',
-     'expected': {'partNewPrice': 399, 'laborNewFee': 80, 'v1Unchanged': True},
-     'priority': 'high'},
-    {'id': 'TC03', 'name': '生成版本2使用最新价', 'category': '报价生成',
-     'description': '已是已报价状态时再次报价，新版本必须使用最新配置价格',
-     'expected': {'version': 2, 'totalCost': 878, 'usesNewPrice': True},
-     'priority': 'high'},
-    {'id': 'TC04', 'name': '版本1不被串改', 'category': '版本隔离',
-     'description': '生成新版本后，旧版本报价金额和明细保持不变（快照隔离）',
-     'expected': {'v1totalCost': 250, 'v1UnitPrice': 100, 'v1LaborFee': 50},
-     'priority': 'high'},
-    {'id': 'TC05', 'name': '刷新/重开后数据一致', 'category': '持久化',
-     'description': '数据写入存储后，重新读取结果完全一致',
-     'expected': {'storageMatchesStore': True, 'v2Persists': True},
-     'priority': 'high'},
-    {'id': 'TC06', 'name': '多版本独立快照', 'category': '版本隔离',
-     'description': '多个报价版本深拷贝存储，修改内存对象不影响其他版本',
-     'expected': {'versionsIndependent': True, 'deepCopyWorks': True},
-     'priority': 'medium'},
-    {'id': 'TC07', 'name': 'doQuote 从最新配置读价', 'category': '数据层校验',
-     'description': '报价保存时根据 ID 从配置实时读价，不依赖输入值（双重保险）',
-     'expected': {'configPricePriority': True, 'domPriceIgnored': True},
-     'priority': 'high'},
-    {'id': 'TC08', 'name': '详情页渲染使用快照', 'category': 'UI渲染',
-     'description': '详情页渲染各版本报价时，使用各自的快照数据，金额显示正确',
-     'expected': {'v1ShowsOldPrice': True, 'v2ShowsNewPrice': True},
-     'priority': 'medium'},
-    {'id': 'TC09', 'name': '历史追加版本2记录', 'category': '历史记录',
-     'description': '生成版本2报价后，操作历史追加版本2记录（同状态刷新）',
-     'expected': {'v2HistoryExists': True, 'v2FromStatus': 'QUOTED', 'v2ToStatus': 'QUOTED'},
-     'priority': 'high'},
-    {'id': 'TC10', 'name': '版本1历史不被串改', 'category': '历史记录',
-     'description': '生成新版本后，版本1的历史记录保持原样',
-     'expected': {'v1HistoryIntact': True, 'v1FromStatus': 'INSPECTING'},
-     'priority': 'high'},
-    {'id': 'TC11', 'name': '刷新后历史持久化', 'category': '持久化',
-     'description': '重新读取后，版本2的历史记录仍然存在',
-     'expected': {'v2HistoryPersists': True, 'storageMatchesStore': True},
-     'priority': 'high'},
-    {'id': 'TC12', 'name': '第N次报价都追加历史', 'category': '历史记录',
-     'description': '生成版本3报价，验证第N次报价都能正确追加历史记录',
-     'expected': {'v3HistoryExists': True, 'totalHistoryCount': 3, 'totalQuoteCount': 3},
-     'priority': 'medium'},
+    {
+        'id': 'TC01',
+        'name': '生成版本1报价',
+        'category': '报价生成',
+        'description': '检测中状态工单生成首次报价，验证金额计算和状态流转',
+        'expected': {'version': 1, 'totalCost': 250, 'partsCount': 1, 'laborCount': 1},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC02',
+        'name': '修改配置价格',
+        'category': '价格配置',
+        'description': '修改配件单价和工时费用，验证配置更新不影响历史快照',
+        'expected': {'partNewPrice': 399, 'laborNewFee': 80, 'v1Unchanged': True},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC03',
+        'name': '生成版本2使用最新价',
+        'category': '报价生成',
+        'description': '已是已报价状态时再次报价，新版本必须使用最新配置价格',
+        'expected': {'version': 2, 'totalCost': 878, 'usesNewPrice': True},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC04',
+        'name': '版本1不被串改',
+        'category': '版本隔离',
+        'description': '生成新版本后，旧版本报价金额和明细保持不变（快照隔离）',
+        'expected': {'v1totalCost': 250, 'v1UnitPrice': 100, 'v1LaborFee': 50},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC05',
+        'name': '刷新/重开后数据一致',
+        'category': '持久化',
+        'description': '数据写入 localStorage 后，刷新页面读取结果完全一致',
+        'expected': {'storageMatchesStore': True, 'v2Persists': True},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC06',
+        'name': '多版本独立快照',
+        'category': '版本隔离',
+        'description': '多个报价版本深拷贝存储，修改内存对象不影响其他版本',
+        'expected': {'versionsIndependent': True, 'deepCopyWorks': True},
+        'priority': 'medium'
+    },
+    {
+        'id': 'TC07',
+        'name': 'doQuote 从最新配置读价',
+        'category': '数据层校验',
+        'description': 'doQuote 保存时根据 ID 从配置实时读价，不依赖 DOM 输入（双重保险）',
+        'expected': {'configPricePriority': True, 'domPriceIgnored': True},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC08',
+        'name': '详情页渲染使用快照',
+        'category': 'UI渲染',
+        'description': '详情页渲染各版本报价时，使用各自的快照数据，金额显示正确',
+        'expected': {'v1ShowsOldPrice': True, 'v2ShowsNewPrice': True},
+        'priority': 'medium'
+    },
+    {
+        'id': 'TC09',
+        'name': '历史追加版本2记录',
+        'category': '历史记录',
+        'description': '生成版本2报价后，操作历史追加版本2记录（同状态刷新）',
+        'expected': {'v2HistoryExists': True, 'v2FromStatus': 'QUOTED', 'v2ToStatus': 'QUOTED'},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC10',
+        'name': '版本1历史不被串改',
+        'category': '历史记录',
+        'description': '生成新版本后，版本1的历史记录保持原样，fromStatus 和备注不被修改',
+        'expected': {'v1HistoryIntact': True, 'v1FromStatus': 'INSPECTING'},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC11',
+        'name': '刷新后历史持久化',
+        'category': '持久化',
+        'description': '刷新页面后，版本2的历史记录仍然存在于 localStorage',
+        'expected': {'v2HistoryPersists': True, 'storageMatchesStore': True},
+        'priority': 'high'
+    },
+    {
+        'id': 'TC12',
+        'name': '第N次报价都追加历史',
+        'category': '历史记录',
+        'description': '生成版本3报价，验证第N次报价都能正确追加历史记录',
+        'expected': {'v3HistoryExists': True, 'totalHistoryCount': 3, 'totalQuoteCount': 3},
+        'priority': 'medium'
+    }
 ]
 
 SUITE_META = {
@@ -87,6 +137,8 @@ SUITE_META = {
 }
 
 EXPORT_FORMAT_VERSION = '2.0.0'
+REQUIRED_RESULT_FIELDS = ['runId', 'suiteVersion', 'startedAt', 'total', 'passed', 'failed', 'results']
+REQUIRED_CASE_RESULT_FIELDS = ['id', 'name', 'category', 'pass', 'timestamp']
 
 # ===== Store 模拟（与 app.js Store 等价）=====
 class Store:
@@ -282,9 +334,28 @@ class ResultManager:
         }
 
     @classmethod
+    def _validate_run_strict(cls, run):
+        errors = []
+        for field in REQUIRED_RESULT_FIELDS:
+            if field not in run or run[field] is None:
+                errors.append(f'缺少必填字段: {field}')
+        if 'results' in run and isinstance(run['results'], list):
+            for idx, r in enumerate(run['results']):
+                for field in REQUIRED_CASE_RESULT_FIELDS:
+                    if field not in r:
+                        errors.append(f'results[{idx}] 缺少字段: {field}')
+        else:
+            errors.append('results 不是数组或不存在')
+        if 'logs' in run and not isinstance(run['logs'], list):
+            errors.append('logs 字段格式错误，应为数组')
+        if 'env' in run and not isinstance(run['env'], dict):
+            errors.append('env 字段格式错误，应为对象')
+        return {'valid': len(errors) == 0, 'errors': errors}
+
+    @classmethod
     def import_runs(cls, import_data):
         report = {'imported': 0, 'duplicates': 0, 'conflicts': 0, 'invalid': 0,
-                  'errors': [], 'importedIds': []}
+                  'errors': [], 'importedIds': [], 'skippedIds': []}
 
         if not import_data or not isinstance(import_data, dict):
             report['errors'].append('导入数据不是有效对象')
@@ -296,9 +367,10 @@ class ResultManager:
             report['invalid'] += 1
             return report
 
-        if import_data.get('formatVersion') != EXPORT_FORMAT_VERSION:
+        imported_version = import_data.get('formatVersion')
+        if imported_version != EXPORT_FORMAT_VERSION:
             report['conflicts'] += 1
-            report['errors'].append('版本警告：导入格式 v' + str(import_data.get('formatVersion')) +
+            report['errors'].append('版本警告：导入格式 v' + str(imported_version) +
                                      '，当前 v' + EXPORT_FORMAT_VERSION + '，尝试兼容导入')
 
         runs = import_data.get('runs', [])
@@ -310,26 +382,37 @@ class ResultManager:
         existing_ids = {r['runId']: r for r in cls._runs}
 
         for i, run in enumerate(runs):
-            required = ['runId', 'suiteVersion', 'startedAt', 'total', 'passed', 'failed', 'results']
-            missing = [f for f in required if f not in run]
-            if missing:
+            validation = cls._validate_run_strict(run)
+            if not validation['valid']:
                 report['invalid'] += 1
-                report['errors'].append(f'第{i+1}条无效: 缺少字段 {", ".join(missing)}')
-                continue
-
-            if not isinstance(run.get('results'), list):
-                report['invalid'] += 1
-                report['errors'].append(f'第{i+1}条无效: results 不是数组')
+                report['errors'].append(f'第{i+1}条无效: ' + '; '.join(validation['errors']))
                 continue
 
             if run['runId'] in existing_ids:
                 report['duplicates'] += 1
                 existing = existing_ids[run['runId']]
-                same = existing['passed'] == run['passed'] and existing['failed'] == run['failed'] and existing['status'] == run['status']
-                if not same:
+                same_result = (existing['passed'] == run['passed'] and
+                               existing['failed'] == run['failed'] and
+                               existing['status'] == run['status'] and
+                               existing['suiteVersion'] == run['suiteVersion'])
+                if not same_result:
                     report['conflicts'] += 1
-                    report['errors'].append(f'重复 runId {run["runId"]} 结果不一致（已跳过，保留历史版本）')
+                    report['errors'].append(
+                        f'版本冲突 runId {run["runId"]}: '
+                        f'历史={existing["passed"]}/{existing["total"]} {existing["status"]}, '
+                        f'导入={run["passed"]}/{run["total"]} {run["status"]} '
+                        f'（已跳过，保留历史版本，不覆盖旧记录）'
+                    )
+                report['skippedIds'].append(run['runId'])
                 continue
+
+            if 'logs' not in run or len(run.get('logs', [])) == 0:
+                report['errors'].append(f'runId {run["runId"]} 警告: 缺少执行日志，将保留空日志')
+
+            if 'results' in run:
+                for r in run['results']:
+                    if 'detail' not in r or r['detail'] is None:
+                        r['detail'] = '无详情'
 
             cls._runs.append(run)
             existing_ids[run['runId']] = run
@@ -338,6 +421,101 @@ class ResultManager:
 
         cls._runs.sort(key=lambda r: r['startedAt'], reverse=True)
         return report
+
+    @classmethod
+    def get_all_runs(cls):
+        return cls._runs.copy()
+
+    @classmethod
+    def get_latest_run(cls):
+        return cls._runs[0] if cls._runs else None
+
+    @classmethod
+    def get_run(cls, run_id):
+        for r in cls._runs:
+            if r['runId'] == run_id:
+                return r
+        return None
+
+    @classmethod
+    def clear_all(cls):
+        cls._runs = []
+        try:
+            import os
+            state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.crp_test_state.json')
+            if os.path.exists(state_file):
+                os.remove(state_file)
+        except:
+            pass
+
+    @classmethod
+    def save_current_state(cls, current_run, active_tab):
+        try:
+            import os
+            import json
+            state = {
+                'currentRunId': current_run['runId'] if current_run else None,
+                'activeTab': active_tab or 'run',
+                'savedAt': _now()
+            }
+            state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.crp_test_state.json')
+            with open(state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print('保存状态失败:', e)
+            return False
+
+    @classmethod
+    def load_current_state(cls):
+        try:
+            import os
+            import json
+            state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.crp_test_state.json')
+            if not os.path.exists(state_file):
+                return None
+            with open(state_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print('加载状态失败:', e)
+            return None
+
+    @classmethod
+    def clear_current_state(cls):
+        try:
+            import os
+            state_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.crp_test_state.json')
+            if os.path.exists(state_file):
+                os.remove(state_file)
+            return True
+        except:
+            return False
+
+    @classmethod
+    def get_failed_cases_with_steps(cls, run):
+        if not run or 'results' not in run:
+            return []
+        import re
+        failed = [r for r in run['results'] if not r.get('pass', False)]
+        result = []
+        for r in failed:
+            steps = []
+            detail = r.get('detail', '')
+            if detail:
+                step_match = re.findall(r'步骤\s*(\d+)', detail)
+                if step_match:
+                    steps = [f'步骤{s}' for s in step_match]
+                else:
+                    steps = [detail]
+            result.append({
+                'id': r.get('id'),
+                'name': r.get('name'),
+                'category': r.get('category'),
+                'detail': detail,
+                'steps': steps,
+                'timestamp': r.get('timestamp')
+            })
+        return result
 
 
 # ===== 断言工具 =====
@@ -596,6 +774,11 @@ def verify_import(filepath):
         print(f'   ⚠️  版本冲突: {report["conflicts"]} 条')
         print(f'   ❌ 数据无效: {report["invalid"]} 条')
 
+        if report.get('importedIds'):
+            print('\n✅ 已导入 runId: ' + ', '.join(report['importedIds']))
+        if report.get('skippedIds'):
+            print('\n⏭️  已跳过（不覆盖旧记录）runId: ' + ', '.join(report['skippedIds']))
+
         if report['errors']:
             print('\n📝 详细信息:')
             for e in report['errors']:
@@ -607,6 +790,8 @@ def verify_import(filepath):
             print(f'   [{i+1}] {r["runId"][:20]}... | {r["passed"]}/{r["total"]} {status}')
 
         print('\n✅ 导入验证完成')
+        print('ℹ️  冲突时保留历史版本，不覆盖旧记录')
+        print('ℹ️  日志和撤销痕迹与结果一起保留')
         sys.exit(1 if report['invalid'] > 0 else 0)
 
     except Exception as e:
