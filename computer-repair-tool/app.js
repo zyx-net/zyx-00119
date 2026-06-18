@@ -38,7 +38,12 @@ var STORAGE_KEYS={
   IMPORT_AUDIT_LOGS:'crp_import_audit_logs',
   IMPORT_STATE:'crp_import_state',
   PERMISSION_CONFIG:'crp_permission_config',
-  IMPORT_DETAIL_VIEW:'crp_import_detail_view'
+  IMPORT_DETAIL_VIEW:'crp_import_detail_view',
+  REPLAY_SCENARIOS:'crp_replay_scenarios',
+  REPLAY_EXECUTIONS:'crp_replay_executions',
+  REPLAY_DRAFTS:'crp_replay_drafts',
+  REPLAY_STATE:'crp_replay_state',
+  REPLAY_DETAIL_VIEW:'crp_replay_detail_view'
 };
 
 function uuid(){return 'xxxx-xxxx'.replace(/x/g,function(){return Math.floor(Math.random()*16).toString(16)})}
@@ -108,7 +113,21 @@ var Store={
   },
   savePermissionConfig:function(o){o.updatedAt=now();this.save(STORAGE_KEYS.PERMISSION_CONFIG,o)},
   getImportDetailView:function(){return this.load(STORAGE_KEYS.IMPORT_DETAIL_VIEW)||null},
-  saveImportDetailView:function(o){this.save(STORAGE_KEYS.IMPORT_DETAIL_VIEW,o)}
+  saveImportDetailView:function(o){this.save(STORAGE_KEYS.IMPORT_DETAIL_VIEW,o)},
+  getReplayScenarios:function(){return this.load(STORAGE_KEYS.REPLAY_SCENARIOS)||[]},
+  saveReplayScenarios:function(o){this.save(STORAGE_KEYS.REPLAY_SCENARIOS,o)},
+  getReplayScenarioById:function(id){var r=this.getReplayScenarios().find(function(s){return s.id===id});return r===undefined?null:r},
+  getReplayExecutions:function(){return this.load(STORAGE_KEYS.REPLAY_EXECUTIONS)||[]},
+  saveReplayExecutions:function(o){this.save(STORAGE_KEYS.REPLAY_EXECUTIONS,o)},
+  getReplayExecutionById:function(id){var r=this.getReplayExecutions().find(function(e){return e.id===id});return r===undefined?null:r},
+  getReplayExecutionsByScenarioId:function(sid){return this.getReplayExecutions().filter(function(e){return e.scenarioId===sid})},
+  getReplayDrafts:function(){return this.load(STORAGE_KEYS.REPLAY_DRAFTS)||[]},
+  saveReplayDrafts:function(o){this.save(STORAGE_KEYS.REPLAY_DRAFTS,o)},
+  getReplayDraftById:function(id){var r=this.getReplayDrafts().find(function(d){return d.id===id});return r===undefined?null:r},
+  getReplayState:function(){return this.load(STORAGE_KEYS.REPLAY_STATE)||null},
+  saveReplayState:function(o){this.save(STORAGE_KEYS.REPLAY_STATE,o)},
+  getReplayDetailView:function(){return this.load(STORAGE_KEYS.REPLAY_DETAIL_VIEW)||null},
+  saveReplayDetailView:function(o){this.save(STORAGE_KEYS.REPLAY_DETAIL_VIEW,o)}
 };
 
 var Validator={
@@ -1120,6 +1139,7 @@ function navigateTo(page,opts){
     case'history':UI.renderHistory();break;
     case'export':UI.renderExport();break;
     case'import-audit':UI.renderImportAudit();break;
+    case'replay-stage':UI.renderReplayStage();break;
   }
 }
 
@@ -2708,7 +2728,1971 @@ window.AppImportShowVerifyModal=importShowVerifyModal;
 window.AppImportVerifyFilePreview=importVerifyFilePreview;
 window.AppImportDoVerify=importDoVerify;
 
-window.CRP={STATUS:STATUS,STATUS_LABELS:STATUS_LABELS,STORAGE_KEYS:STORAGE_KEYS,Store:Store,QuoteEngine:QuoteEngine,StatusEngine:StatusEngine,Validator:Validator,PermissionManager:PermissionManager,ImportAuditEngine:ImportAuditEngine,renderQuoteTable:renderQuoteTable,now:now,uuid:uuid,SampleData:SampleData};
+var REPLAY_SCENARIO_STATUS={DRAFT:'draft',PUBLISHED:'published',ARCHIVED:'archived'};
+var REPLAY_SCENARIO_STATUS_LABELS={};
+REPLAY_SCENARIO_STATUS_LABELS[REPLAY_SCENARIO_STATUS.DRAFT]='草稿';
+REPLAY_SCENARIO_STATUS_LABELS[REPLAY_SCENARIO_STATUS.PUBLISHED]='已发布';
+REPLAY_SCENARIO_STATUS_LABELS[REPLAY_SCENARIO_STATUS.ARCHIVED]='已归档';
+var REPLAY_EXECUTION_STATUS={PENDING:'pending',RUNNING:'running',COMPLETED:'completed',PARTIAL:'partial',FAILED:'failed',ROLLED_BACK:'rolled_back'};
+var REPLAY_EXECUTION_STATUS_LABELS={};
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.PENDING]='待执行';
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.RUNNING]='执行中';
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.COMPLETED]='全部成功';
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.PARTIAL]='部分成功';
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.FAILED]='全部失败';
+REPLAY_EXECUTION_STATUS_LABELS[REPLAY_EXECUTION_STATUS.ROLLED_BACK]='已撤销';
+var REPLAY_STEP_TYPES={ADVANCE_ORDER:'advance_order',GENERATE_QUOTE:'generate_quote',CONFIRM_QUOTE:'confirm_quote',START_REPAIR:'start_repair',COMPLETE_REPAIR:'complete_repair',PICK_UP:'pick_up',TERMINATE:'terminate',ROLLBACK:'rollback',CREATE_ORDER:'create_order'};
+var REPLAY_STEP_TYPE_LABELS={};
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.ADVANCE_ORDER]='推进工单状态';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.GENERATE_QUOTE]='生成报价';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.CONFIRM_QUOTE]='客户确认报价';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.START_REPAIR]='开始维修';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.COMPLETE_REPAIR]='维修完成';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.PICK_UP]='客户取机';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.TERMINATE]='异常终止工单';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.ROLLBACK]='撤回状态';
+REPLAY_STEP_TYPE_LABELS[REPLAY_STEP_TYPES.CREATE_ORDER]='创建工单';
+var REPLAY_PACKAGE_FORMAT='crp-replay-package';
+var REPLAY_PACKAGE_VERSION='1.0.0';
+var REPLAY_CONFLICT_TYPES={DUPLICATE:'duplicate',VERSION_MISMATCH:'version_mismatch',MISSING_FIELDS:'missing_fields',PERMISSION:'permission'};
+var REPLAY_CONFLICT_LABELS={};
+REPLAY_CONFLICT_LABELS[REPLAY_CONFLICT_TYPES.DUPLICATE]='重复场景';
+REPLAY_CONFLICT_LABELS[REPLAY_CONFLICT_TYPES.VERSION_MISMATCH]='版本不匹配';
+REPLAY_CONFLICT_LABELS[REPLAY_CONFLICT_TYPES.MISSING_FIELDS]='缺少字段';
+REPLAY_CONFLICT_LABELS[REPLAY_CONFLICT_TYPES.PERMISSION]='无权限';
+var REPLAY_ROLE_PERMISSIONS={
+  admin:{canCreateScenario:true,canEditScenario:true,canDeleteScenario:true,canExecuteScenario:true,canRollbackExecution:true,canExportPackage:true,canImportPackage:true,canViewAllScenarios:true,canManageDrafts:true},
+  operator:{canCreateScenario:true,canEditScenario:true,canDeleteScenario:false,canExecuteScenario:true,canRollbackExecution:true,canExportPackage:true,canImportPackage:true,canViewAllScenarios:true,canManageDrafts:true},
+  viewer:{canCreateScenario:false,canEditScenario:false,canDeleteScenario:false,canExecuteScenario:false,canRollbackExecution:false,canExportPackage:false,canImportPackage:false,canViewAllScenarios:true,canManageDrafts:false}
+};
+
+var ReplayPermission={
+  hasPermission:function(action){
+    var cfg=PermissionManager.getConfig();
+    var role=cfg.currentRole||'admin';
+    var perms=REPLAY_ROLE_PERMISSIONS[role];
+    if(!perms)return false;
+    return perms[action]===true;
+  },
+  canCreate:function(){return this.hasPermission('canCreateScenario');},
+  canEdit:function(){return this.hasPermission('canEditScenario');},
+  canDelete:function(){return this.hasPermission('canDeleteScenario');},
+  canPublish:function(){return this.hasPermission('canEditScenario');},
+  canExecute:function(){return this.hasPermission('canExecuteScenario');},
+  canRollback:function(){return this.hasPermission('canRollbackExecution');},
+  canExport:function(){return this.hasPermission('canExportPackage');},
+  canImport:function(){return this.hasPermission('canImportPackage');},
+  canViewAll:function(){return this.hasPermission('canViewAllScenarios');},
+  canManageDrafts:function(){return this.hasPermission('canManageDrafts');},
+  canManagePermission:function(){return PermissionManager.getCurrentRole()==='admin';},
+  getBlockMsg:function(action){
+    var labels={canCreateScenario:'新建演练',canEditScenario:'编辑演练',canDeleteScenario:'删除演练',canExecuteScenario:'执行演练',canRollbackExecution:'撤销执行',canExportPackage:'导出演练包',canImportPackage:'导入演练包',canManageDrafts:'管理草稿'};
+    var label=labels[action]||action;
+    var cfg=PermissionManager.getConfig();
+    return '无权限'+label+'，当前角色 '+(cfg.currentRole||'admin')+' 没有权限，请联系管理员在权限配置中开通';
+  }
+};
+
+var ScenarioEngine={
+  list:function(filters){
+    var scenarios=Store.getReplayScenarios();
+    if(filters){
+      if(filters.status)scenarios=scenarios.filter(function(s){return s.status===filters.status;});
+      if(filters.keyword){
+        var kw=filters.keyword.toLowerCase();
+        scenarios=scenarios.filter(function(s){return s.name.toLowerCase().indexOf(kw)>-1||(s.description||'').toLowerCase().indexOf(kw)>-1;});
+      }
+      if(filters.createdBy){
+        var cb=filters.createdBy.toLowerCase();
+        scenarios=scenarios.filter(function(s){return (s.createdBy||'').toLowerCase().indexOf(cb)>-1;});
+      }
+    }
+    return scenarios.slice().sort(function(a,b){return new Date(b.updatedAt)-new Date(a.updatedAt);});
+  },
+  getById:function(id){return Store.getReplayScenarioById(id);},
+  create:function(data,handler){
+    if(!ReplayPermission.canCreate())return{ok:false,msg:ReplayPermission.getBlockMsg('canCreateScenario')};
+    if(!data||!data.name||!data.name.trim())return{ok:false,msg:'演练名称不能为空'};
+    var scenario={
+      id:'sc-'+uuid(),
+      name:data.name.trim(),
+      description:data.description||'',
+      status:REPLAY_SCENARIO_STATUS.DRAFT,
+      version:data.version||'1.0.0',
+      steps:data.steps||[],
+      seedData:{orders:data.seedOrders||[],quotes:data.seedQuotes||[],history:data.seedHistory||[]},
+      tags:data.tags||[],
+      createdBy:handler||'系统',
+      updatedBy:handler||'系统',
+      createdAt:now(),
+      updatedAt:now(),
+      executionCount:0,
+      lastExecutedAt:null
+    };
+    var list=Store.getReplayScenarios();
+    list.unshift(scenario);
+    Store.saveReplayScenarios(list);
+    return{ok:true,scenario:scenario};
+  },
+  update:function(id,data,handler){
+    if(!ReplayPermission.canEdit())return{ok:false,msg:ReplayPermission.getBlockMsg('canEditScenario')};
+    var list=Store.getReplayScenarios();
+    var idx=list.findIndex(function(s){return s.id===id});
+    if(idx===-1)return{ok:false,msg:'演练不存在'};
+    if(data.name!==undefined){
+      if(!data.name||!data.name.trim())return{ok:false,msg:'演练名称不能为空'};
+      list[idx].name=data.name.trim();
+    }
+    if(data.description!==undefined)list[idx].description=data.description;
+    if(data.steps!==undefined)list[idx].steps=data.steps;
+    if(data.seedData!==undefined)list[idx].seedData=data.seedData;
+    if(data.tags!==undefined)list[idx].tags=data.tags;
+    if(data.status!==undefined)list[idx].status=data.status;
+    if(data.version!==undefined)list[idx].version=data.version;
+    list[idx].updatedBy=handler||'系统';
+    list[idx].updatedAt=now();
+    Store.saveReplayScenarios(list);
+    return{ok:true,scenario:list[idx]};
+  },
+  remove:function(id){
+    if(!ReplayPermission.canDelete())return{ok:false,msg:ReplayPermission.getBlockMsg('canDeleteScenario')};
+    var list=Store.getReplayScenarios();
+    var filtered=list.filter(function(s){return s.id!==id});
+    if(filtered.length===list.length)return{ok:false,msg:'演练不存在'};
+    Store.saveReplayScenarios(filtered);
+    var execs=Store.getReplayExecutions().filter(function(e){return e.scenarioId!==id});
+    Store.saveReplayExecutions(execs);
+    return{ok:true};
+  },
+  publish:function(id,handler){
+    return this.update(id,{status:REPLAY_SCENARIO_STATUS.PUBLISHED},handler);
+  },
+  archive:function(id,handler){
+    return this.update(id,{status:REPLAY_SCENARIO_STATUS.ARCHIVED},handler);
+  },
+  addStep:function(id,step,handler){
+    var scenario=this.getById(id);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    var steps=scenario.steps||[];
+    steps.push(Object.assign({id:'step-'+uuid(),order:steps.length+1,createdAt:now()},step));
+    return this.update(id,{steps:steps},handler);
+  },
+  removeStep:function(id,stepId,handler){
+    var scenario=this.getById(id);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    var steps=(scenario.steps||[]).filter(function(s){return s.id!==stepId});
+    steps.forEach(function(s,i){s.order=i+1;});
+    return this.update(id,{steps:steps},handler);
+  },
+  reorderSteps:function(id,orderedStepIds,handler){
+    var scenario=this.getById(id);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    var steps=scenario.steps||[];
+    var newSteps=orderedStepIds.map(function(sid){return steps.find(function(s){return s.id===sid});}).filter(Boolean);
+    newSteps.forEach(function(s,i){s.order=i+1;});
+    return this.update(id,{steps:newSteps},handler);
+  }
+};
+
+var DraftEngine={
+  list:function(){
+    if(!ReplayPermission.canManageDrafts())return[];
+    return Store.getReplayDrafts().slice().sort(function(a,b){return new Date(b.updatedAt)-new Date(a.updatedAt);});
+  },
+  getById:function(id){return Store.getReplayDraftById(id);},
+  save:function(data,handler){
+    if(!ReplayPermission.canManageDrafts())return{ok:false,msg:ReplayPermission.getBlockMsg('canManageDrafts')};
+    var list=Store.getReplayDrafts();
+    if(data.id){
+      var idx=list.findIndex(function(d){return d.id===data.id});
+      if(idx>-1){
+        list[idx]=Object.assign({},list[idx],data,{updatedBy:handler||'系统',updatedAt:now()});
+      }else{
+        return{ok:false,msg:'草稿不存在'};
+      }
+    }else{
+      var draft={
+        id:'draft-'+uuid(),
+        name:data.name||'未命名演练草稿',
+        description:data.description||'',
+        version:data.version||'1.0.0',
+        steps:data.steps||[],
+        seedData:data.seedData||{orders:[],quotes:[],history:[]},
+        tags:data.tags||[],
+        autoSave:data.autoSave!==false,
+        createdBy:handler||'系统',
+        updatedBy:handler||'系统',
+        createdAt:now(),
+        updatedAt:now()
+      };
+      list.unshift(draft);
+      data.id=draft.id;
+    }
+    Store.saveReplayDrafts(list);
+    return{ok:true,draft:data.id?Store.getReplayDraftById(data.id):list[0]};
+  },
+  remove:function(id){
+    if(!ReplayPermission.canManageDrafts())return{ok:false,msg:ReplayPermission.getBlockMsg('canManageDrafts')};
+    var list=Store.getReplayDrafts();
+    var filtered=list.filter(function(d){return d.id!==id});
+    if(filtered.length===list.length)return{ok:false,msg:'草稿不存在'};
+    Store.saveReplayDrafts(filtered);
+    return{ok:true};
+  },
+  publishDraft:function(draftId,handler){
+    var draft=this.getById(draftId);
+    if(!draft)return{ok:false,msg:'草稿不存在'};
+    var createResult=ScenarioEngine.create({
+      name:draft.name,description:draft.description,version:draft.version,
+      steps:draft.steps,seedOrders:draft.seedData.orders,
+      seedQuotes:draft.seedData.quotes,seedHistory:draft.seedData.history,
+      tags:draft.tags
+    },handler);
+    if(!createResult.ok)return createResult;
+    var pubResult=ScenarioEngine.publish(createResult.scenario.id,handler);
+    if(!pubResult.ok)return pubResult;
+    this.remove(draftId);
+    return{ok:true,scenario:pubResult.scenario};
+  },
+  loadToDraft:function(scenarioId,handler){
+    var scenario=ScenarioEngine.getById(scenarioId);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    return this.save({
+      name:scenario.name+' (副本)',
+      description:scenario.description,
+      version:scenario.version,
+      steps:JSON.parse(JSON.stringify(scenario.steps||[])),
+      seedData:JSON.parse(JSON.stringify(scenario.seedData||{orders:[],quotes:[],history:[]})),
+      tags:scenario.tags
+    },handler);
+  },
+  saveDraft:function(data,handler){return this.save(data,handler);},
+  listDrafts:function(filters){return this.list();},
+  removeDraft:function(id){return this.remove(id);},
+  getDraftById:function(id){return this.getById(id);}
+};
+
+var ScenarioExecutionEngine={
+  listExecutions:function(filters){
+    var execs=Store.getReplayExecutions();
+    if(filters){
+      if(filters.scenarioId)execs=execs.filter(function(e){return e.scenarioId===filters.scenarioId});
+      if(filters.status)execs=execs.filter(function(e){return e.status===filters.status});
+      if(filters.handler){
+        var h=filters.handler.toLowerCase();
+        execs=execs.filter(function(e){return (e.handler||'').toLowerCase().indexOf(h)>-1;});
+      }
+      if(filters.batchNo){
+        var b=filters.batchNo.toLowerCase();
+        execs=execs.filter(function(e){return (e.batchNo||'').toLowerCase().indexOf(b)>-1;});
+      }
+    }
+    return execs.slice().sort(function(a,b){return new Date(b.startedAt||b.createdAt)-new Date(a.startedAt||a.createdAt);});
+  },
+  getExecutionById:function(id){return Store.getReplayExecutionById(id);},
+  getLatestExecution:function(scenarioId){
+    var execs=this.listExecutions({scenarioId:scenarioId});
+    return execs.length>0?execs[0]:null;
+  },
+  generateBatchNo:function(){
+    return 'REP-'+formatDate(now()).replace(/-/g,'')+'-'+String(Store.getReplayExecutions().length+1).padStart(4,'0');
+  },
+  createExecution:function(scenarioId,handler,note){
+    if(!ReplayPermission.canExecute())return{ok:false,msg:ReplayPermission.getBlockMsg('canExecuteScenario')};
+    var scenario=ScenarioEngine.getById(scenarioId);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    var hv=PermissionManager.validateHandler(handler);
+    if(!hv.ok)return{ok:false,msg:hv.msg};
+    var exec={
+      id:'exec-'+uuid(),
+      batchNo:this.generateBatchNo(),
+      scenarioId:scenarioId,
+      scenarioName:scenario.name,
+      scenarioVersion:scenario.version,
+      status:REPLAY_EXECUTION_STATUS.PENDING,
+      handler:handler||'系统',
+      note:note||'',
+      operator:handler||'系统',
+      remark:note||'',
+      createdAt:now(),
+      startedAt:null,
+      finishedAt:null,
+      totalSteps:scenario.steps?scenario.steps.length:0,
+      completedSteps:0,
+      failedSteps:0,
+      skippedSteps:0,
+      stepLogs:[],
+      failureDetails:[],
+      operatorRemarks:[],
+      snapshots:{before:null,after:null},
+      beforeSnapshot:null,
+      afterSnapshot:null,
+      resultSummary:null,
+      rolledBackAt:null,
+      rollbackInfo:null
+    };
+    var list=Store.getReplayExecutions();
+    list.unshift(exec);
+    Store.saveReplayExecutions(list);
+    return{ok:true,execution:exec,executionId:exec.id};
+  },
+  _takeSnapshot:function(){
+    return{
+      orders:JSON.parse(JSON.stringify(Store.getOrders())),
+      quotes:JSON.parse(JSON.stringify(Store.getQuotes())),
+      history:JSON.parse(JSON.stringify(Store.getHistory())),
+      rollbacks:JSON.parse(JSON.stringify(Store.getRollbacks())),
+      terminations:JSON.parse(JSON.stringify(Store.getTerminations())),
+      timestamp:now()
+    };
+  },
+  _restoreSnapshot:function(snap){
+    if(!snap)return;
+    if(snap.orders)Store.saveOrders(snap.orders);
+    if(snap.quotes)Store.saveQuotes(snap.quotes);
+    if(snap.history)Store.saveHistory(snap.history);
+    if(snap.rollbacks)Store.saveRollbacks(snap.rollbacks);
+    if(snap.terminations)Store.saveTerminations(snap.terminations);
+  },
+  execute:function(executionId){
+    var self=this;
+    return new Promise(function(resolve){
+      var list=Store.getReplayExecutions();
+      var exec=list.find(function(e){return e.id===executionId});
+      if(!exec){resolve({ok:false,msg:'执行批次不存在'});return;}
+      var scenario=ScenarioEngine.getById(exec.scenarioId);
+      if(!scenario){resolve({ok:false,msg:'演练不存在'});return;}
+      exec.status=REPLAY_EXECUTION_STATUS.RUNNING;
+      exec.startedAt=now();
+      exec.snapshots.before=self._takeSnapshot();
+      Store.saveReplayExecutions(list);
+      var seedData=scenario.seedData||{};
+      if(seedData.orders&&seedData.orders.length){
+        var existingOrders=Store.getOrders();
+        var existingMap={};
+        existingOrders.forEach(function(o){existingMap[o.id]=o;existingMap[o.orderNo]=o;});
+        seedData.orders.forEach(function(o){
+          if(!existingMap[o.id]&&!existingMap[o.orderNo])existingOrders.push(JSON.parse(JSON.stringify(o)));
+        });
+        Store.saveOrders(existingOrders);
+      }
+      if(seedData.quotes&&seedData.quotes.length){
+        var existingQuotes=Store.getQuotes();
+        var eqMap={};
+        existingQuotes.forEach(function(q){eqMap[q.id]=q;});
+        seedData.quotes.forEach(function(q){if(!eqMap[q.id])existingQuotes.push(JSON.parse(JSON.stringify(q)));});
+        Store.saveQuotes(existingQuotes);
+      }
+      if(seedData.history&&seedData.history.length){
+        var existingHistory=Store.getHistory();
+        var ehMap={};
+        existingHistory.forEach(function(h){ehMap[h.id]=h;});
+        seedData.history.forEach(function(h){if(!ehMap[h.id])existingHistory.push(JSON.parse(JSON.stringify(h)));});
+        Store.saveHistory(existingHistory);
+      }
+      var stepLogs=[];
+      var failureDetails=[];
+      var completed=0;
+      var failed=0;
+      var skipped=0;
+      var steps=scenario.steps||[];
+      function runStep(idx){
+        if(idx>=steps.length){
+          exec.status=failed>0&&completed>0?REPLAY_EXECUTION_STATUS.PARTIAL:(failed>0?REPLAY_EXECUTION_STATUS.FAILED:REPLAY_EXECUTION_STATUS.COMPLETED);
+          exec.finishedAt=now();
+          exec.completedSteps=completed;
+          exec.failedSteps=failed;
+          exec.skippedSteps=skipped;
+          exec.stepLogs=stepLogs;
+          exec.failureDetails=failureDetails;
+          exec.beforeSnapshot=exec.snapshots.before;
+          exec.snapshots.after=self._takeSnapshot();
+          exec.afterSnapshot=exec.snapshots.after;
+          var step0=stepLogs[0]||{};
+          exec.stepLogs.forEach(function(l){if(l.stepIndex===1){l.operatorRemarks=exec.operatorRemarks.filter(function(r){return r.stepIndex===1});}else{l.operatorRemarks=exec.operatorRemarks.filter(function(r){return r.stepIndex===l.stepIndex});}});
+          exec.resultSummary={
+            total:steps.length,completed:completed,failed:failed,skipped:skipped,
+            completedAt:now(),
+            seedOrdersCount:(seedData.orders||[]).length,
+            seedQuotesCount:(seedData.quotes||[]).length,
+            seedHistoryCount:(seedData.history||[]).length
+          };
+          var slist=Store.getReplayScenarios();
+          var si=slist.findIndex(function(s){return s.id===exec.scenarioId});
+          if(si>-1){
+            slist[si].executionCount=(slist[si].executionCount||0)+1;
+            slist[si].lastExecutedAt=now();
+            Store.saveReplayScenarios(slist);
+          }
+          Store.saveReplayExecutions(list);
+          resolve({ok:true,execution:exec});
+          return;
+        }
+        var step=steps[idx];
+        var log={
+          stepId:step.id,stepIndex:idx+1,stepType:step.type,
+          stepName:REPLAY_STEP_TYPE_LABELS[step.type]||step.type,
+          startedAt:now(),finishedAt:null,
+          status:'pending',detail:'',error:null,note:step.note||''
+        };
+        try{
+          var result=self._executeStep(step,exec.handler);
+          log.finishedAt=now();
+          log.status=result.ok?'success':(result.skipped?'skipped':'failed');
+          log.detail=result.msg||'';
+          if(result.ok){
+            completed++;
+          }else if(result.skipped){
+            skipped++;
+          }else{
+            failed++;
+            failureDetails.push({
+              stepIndex:idx+1,stepId:step.id,stepType:step.type,
+              stepName:REPLAY_STEP_TYPE_LABELS[step.type]||step.type,
+              error:result.msg,timestamp:now()
+            });
+          }
+        }catch(err){
+          log.finishedAt=now();
+          log.status='failed';
+          log.error=err.message;
+          failed++;
+          failureDetails.push({
+            stepIndex:idx+1,stepId:step.id,stepType:step.type,
+            stepName:REPLAY_STEP_TYPE_LABELS[step.type]||step.type,
+            error:err.message,timestamp:now()
+          });
+        }
+        stepLogs.push(log);
+        setTimeout(function(){runStep(idx+1);},10);
+      }
+      runStep(0);
+    });
+  },
+  _executeStep:function(step,handler){
+    var self=this;
+    switch(step.type){
+      case REPLAY_STEP_TYPES.CREATE_ORDER:{
+        if(!step.orderData)return{ok:false,msg:'缺少工单数据'};
+        var od=step.orderData;
+        var orderNo=od.orderNo||generateOrderNo();
+        var orders=Store.getOrders();
+        if(orders.some(function(o){return o.orderNo===orderNo}))return{ok:false,skipped:true,msg:'工单号已存在，跳过创建：'+orderNo};
+        var order={
+          id:od.id||uuid(),orderNo:orderNo,
+          customerName:od.customerName||'演练客户',
+          customerPhone:od.customerPhone||'13800000000',
+          deviceType:od.deviceType||'笔记本',
+          deviceBrand:od.deviceBrand||'演练品牌',
+          deviceModel:od.deviceModel||'',
+          faultDescription:od.faultDescription||'演练故障',
+          handler:handler||od.handler||'系统',
+          currentStatus:STATUS.REGISTERED,
+          createdAt:now(),updatedAt:now()
+        };
+        orders.push(order);
+        Store.saveOrders(orders);
+        var h=Store.getHistory();
+        h.push({id:uuid(),orderId:order.id,fromStatus:'',toStatus:STATUS.REGISTERED,handler:handler||'系统',note:step.note||'演练创建工单',timestamp:now(),type:'advance'});
+        Store.saveHistory(h);
+        step._createdOrderId=order.id;
+        return{ok:true,msg:'创建工单成功：'+orderNo};
+      }
+      case REPLAY_STEP_TYPES.ADVANCE_ORDER:{
+        if(!step.orderId||!step.targetStatus)return{ok:false,msg:'缺少工单ID或目标状态'};
+        var r=StatusEngine.advance(step.orderId,step.targetStatus,handler,step.note||'演练推进');
+        return r.ok?{ok:true,msg:r.msg||'状态推进成功'}:{ok:false,msg:r.msg};
+      }
+      case REPLAY_STEP_TYPES.GENERATE_QUOTE:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var parts=step.parts||[];
+        var laborItems=step.laborItems||[];
+        if(!parts.length&&!laborItems.length){
+          parts=[{partId:(Store.getParts()[0]||{}).id,partName:'演练配件',unitPrice:100,quantity:1,subtotal:100}];
+        }
+        var qr=QuoteEngine.generate(step.orderId,parts,laborItems,handler);
+        return qr.ok?{ok:true,msg:'生成报价成功，版本'+(qr.quote?qr.quote.version:'?')}:{ok:false,msg:qr.msg};
+      }
+      case REPLAY_STEP_TYPES.CONFIRM_QUOTE:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var r2=StatusEngine.advance(step.orderId,STATUS.CONFIRMED,handler,step.note||'演练确认报价');
+        return r2.ok?{ok:true,msg:r2.msg||'报价确认成功'}:{ok:false,msg:r2.msg};
+      }
+      case REPLAY_STEP_TYPES.START_REPAIR:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var r3=StatusEngine.advance(step.orderId,STATUS.REPAIRING,handler,step.note||'演练开始维修');
+        return r3.ok?{ok:true,msg:r3.msg||'开始维修成功'}:{ok:false,msg:r3.msg};
+      }
+      case REPLAY_STEP_TYPES.COMPLETE_REPAIR:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var r4=StatusEngine.advance(step.orderId,STATUS.COMPLETED,handler,step.note||'演练完成维修');
+        return r4.ok?{ok:true,msg:r4.msg||'维修完成成功'}:{ok:false,msg:r4.msg};
+      }
+      case REPLAY_STEP_TYPES.PICK_UP:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var r5=StatusEngine.advance(step.orderId,STATUS.PICKED_UP,handler,step.note||'演练客户取机');
+        return r5.ok?{ok:true,msg:r5.msg||'客户取机成功'}:{ok:false,msg:r5.msg};
+      }
+      case REPLAY_STEP_TYPES.TERMINATE:{
+        if(!step.orderId||!step.reason)return{ok:false,msg:'缺少工单ID或终止原因'};
+        var r6=StatusEngine.terminate(step.orderId,step.reason,handler);
+        return r6.ok?{ok:true,msg:r6.msg||'工单终止成功'}:{ok:false,msg:r6.msg};
+      }
+      case REPLAY_STEP_TYPES.ROLLBACK:{
+        if(!step.orderId)return{ok:false,msg:'缺少工单ID'};
+        var r7=StatusEngine.rollback(step.orderId,handler,step.note||'演练撤回');
+        return r7.ok?{ok:true,msg:r7.msg||'状态撤回成功'}:{ok:false,msg:r7.msg};
+      }
+      default:
+        return{ok:false,msg:'未知步骤类型：'+step.type};
+    }
+  },
+  addOperatorRemark:function(executionId,stepIndex,content,handler){
+    var list=Store.getReplayExecutions();
+    var exec=list.find(function(e){return e.id===executionId});
+    if(!exec)return{ok:false,msg:'执行批次不存在'};
+    exec.operatorRemarks=exec.operatorRemarks||[];
+    exec.operatorRemarks.push({
+      id:uuid(),stepIndex:stepIndex,content:content,
+      handler:handler||'系统',timestamp:now()
+    });
+    Store.saveReplayExecutions(list);
+    return{ok:true};
+  },
+  rollbackExecution:function(executionId,handler,reason){
+    if(!ReplayPermission.canRollback())return Promise.resolve({ok:false,msg:ReplayPermission.getBlockMsg('canRollbackExecution')});
+    var self=this;
+    return new Promise(function(resolve){
+      var list=Store.getReplayExecutions();
+      var exec=list.find(function(e){return e.id===executionId});
+      if(!exec){resolve({ok:false,msg:'执行批次不存在'});return;}
+      if(exec.status===REPLAY_EXECUTION_STATUS.ROLLED_BACK){resolve({ok:false,msg:'该批次已撤销，不能重复撤销'});return;}
+      if(!exec.snapshots||!exec.snapshots.before){resolve({ok:false,msg:'没有执行前快照，无法撤销'});return;}
+      self._restoreSnapshot(exec.snapshots.before);
+      exec.status=REPLAY_EXECUTION_STATUS.ROLLED_BACK;
+      exec.rolledBackAt=now();
+      exec.rollbackInfo={handler:handler||'系统',reason:reason||'用户操作撤销',rolledBackAt:now(),previousStatus:exec.status,rollbackCount:exec.completedSteps};
+      Store.saveReplayExecutions(list);
+      resolve({ok:true,execution:exec});
+    });
+  }
+};
+
+var ScenarioPackageEngine={
+  exportScenario:function(scenarioId){
+    if(!ReplayPermission.canExport())return{ok:false,msg:ReplayPermission.getBlockMsg('canExportPackage')};
+    var scenario=ScenarioEngine.getById(scenarioId);
+    if(!scenario)return{ok:false,msg:'演练不存在'};
+    var executions=Store.getReplayExecutionsByScenarioId(scenarioId);
+    return{
+      ok:true,
+      package:{
+        exportFormat:REPLAY_PACKAGE_FORMAT,
+        formatVersion:REPLAY_PACKAGE_VERSION,
+        exportedAt:now(),
+        exportedBy:PermissionManager.getConfig().currentRole,
+        scenario:JSON.parse(JSON.stringify(scenario)),
+        executions:JSON.parse(JSON.stringify(executions))
+      }
+    };
+  },
+  exportMultiple:function(scenarioIds){
+    if(!ReplayPermission.canExport())return{ok:false,msg:ReplayPermission.getBlockMsg('canExportPackage')};
+    var scenarios=[];
+    var executions=[];
+    scenarioIds.forEach(function(sid){
+      var s=ScenarioEngine.getById(sid);
+      if(s){
+        scenarios.push(JSON.parse(JSON.stringify(s)));
+        Store.getReplayExecutionsByScenarioId(sid).forEach(function(e){executions.push(JSON.parse(JSON.stringify(e)));});
+      }
+    });
+    return{
+      ok:true,
+      package:{
+        exportFormat:REPLAY_PACKAGE_FORMAT,
+        formatVersion:REPLAY_PACKAGE_VERSION,
+        exportedAt:now(),
+        exportedBy:PermissionManager.getConfig().currentRole,
+        scenarios:scenarios,
+        executions:executions,
+        isBundle:true
+      }
+    };
+  },
+  _validateScenarioSchema:function(s,index){
+    var prefix=index!==undefined?'第'+(index+1)+'个演练':'演练';
+    var requiredFields=['id','name','status','steps'];
+    var missing=[];
+    requiredFields.forEach(function(f){if(s[f]===undefined||s[f]===null)missing.push(f);});
+    if(missing.length>0)return{valid:false,msg:prefix+'缺少必填字段：'+missing.join('、')};
+    if(!s.name||!String(s.name).trim())return{valid:false,msg:prefix+'名称不能为空'};
+    if(s.steps&&!Array.isArray(s.steps))return{valid:false,msg:prefix+'步骤格式不正确'};
+    return{valid:true};
+  },
+  precheckImport:function(pkg){
+    var self=this;
+    var result={
+      canImport:false,
+      hasBlocked:false,
+      conflicts:[],
+      groupedConflicts:{},
+      stats:{totalScenarios:0,validScenarios:0,duplicateScenarios:0,versionMismatch:0,missingFields:0,permissionBlocked:0,executionsInPackage:0},
+      issues:[]
+    };
+    if(!ReplayPermission.canImport()){
+      result.hasBlocked=true;
+      result.conflicts.push({type:REPLAY_CONFLICT_TYPES.PERMISSION,severity:'blocked',message:ReplayPermission.getBlockMsg('canImportPackage')});
+      return result;
+    }
+    if(!pkg||pkg.exportFormat!==REPLAY_PACKAGE_FORMAT){
+      result.issues.push({type:'format',severity:'error',message:'文件格式不正确，缺少 exportFormat 字段或值错误'});
+      return result;
+    }
+    if(!pkg.formatVersion){
+      result.issues.push({type:'missing',severity:'error',message:'缺少 formatVersion 字段'});
+      return result;
+    }
+    if(pkg.formatVersion!==REPLAY_PACKAGE_VERSION){
+      result.stats.versionMismatch++;
+      result.conflicts.push({type:REPLAY_CONFLICT_TYPES.VERSION_MISMATCH,severity:'warning',
+        message:'演练包版本 '+pkg.formatVersion+' 与当前版本 '+REPLAY_PACKAGE_VERSION+' 不一致，尝试兼容导入'});
+    }
+    var incomingScenarios=pkg.isBundle?(pkg.scenarios||[]):(pkg.scenario?[pkg.scenario]:[]);
+    result.stats.totalScenarios=incomingScenarios.length;
+    result.stats.executionsInPackage=(pkg.executions||[]).length;
+    var existingScenarios=Store.getReplayScenarios();
+    var existingMap={};
+    existingScenarios.forEach(function(s){existingMap[s.id]=s;existingMap[s.name]=s;});
+    incomingScenarios.forEach(function(s,idx){
+      var schemaResult=self._validateScenarioSchema(s,idx);
+      if(!schemaResult.valid){
+        result.stats.missingFields++;
+        result.conflicts.push({type:REPLAY_CONFLICT_TYPES.MISSING_FIELDS,severity:'error',
+          itemId:s.id||('scenario-'+idx),itemName:s.name||('第'+(idx+1)+'个演练'),
+          message:schemaResult.msg,data:s});
+        return;
+      }
+      var existing=existingMap[s.id];
+      if(!existing&&s.name)existing=existingMap[s.name];
+      if(existing){
+        var isSame=JSON.stringify(s)===JSON.stringify(existing);
+        result.stats.duplicateScenarios++;
+        result.conflicts.push({
+          type:REPLAY_CONFLICT_TYPES.DUPLICATE,severity:isSame?'warning':'error',
+          itemId:s.id,itemName:s.name+' (ID: '+s.id+')',
+          message:isSame?'演练数据完全相同，将跳过':'演练ID或名称已存在（现有版本：'+existing.version+'，导入版本：'+s.version+'）',
+          data:s,existing:existing,isSame:isSame,isVersionDiff:existing.version!==s.version,
+          needConfirm:!isSame
+        });
+      }else{
+        result.stats.validScenarios++;
+      }
+    });
+    result.hasBlocked=result.conflicts.some(function(c){return c.severity==='blocked'});
+    var hasErrors=result.conflicts.some(function(c){return c.severity==='error'});
+    result.canImport=!result.hasBlocked&&(result.stats.validScenarios>0||result.stats.duplicateScenarios>0);
+    result.needConfirm=result.conflicts.some(function(c){return c.needConfirm});
+    result.groupedConflicts[REPLAY_CONFLICT_TYPES.DUPLICATE]=result.conflicts.filter(function(c){return c.type===REPLAY_CONFLICT_TYPES.DUPLICATE});
+    result.groupedConflicts[REPLAY_CONFLICT_TYPES.VERSION_MISMATCH]=result.conflicts.filter(function(c){return c.type===REPLAY_CONFLICT_TYPES.VERSION_MISMATCH});
+    result.groupedConflicts[REPLAY_CONFLICT_TYPES.MISSING_FIELDS]=result.conflicts.filter(function(c){return c.type===REPLAY_CONFLICT_TYPES.MISSING_FIELDS});
+    result.groupedConflicts[REPLAY_CONFLICT_TYPES.PERMISSION]=result.conflicts.filter(function(c){return c.type===REPLAY_CONFLICT_TYPES.PERMISSION});
+    return result;
+  },
+  doImport:function(pkg,precheck,options,handler){
+    var self=this;
+    return new Promise(function(resolve){
+      if(!ReplayPermission.canImport()){resolve({ok:false,msg:ReplayPermission.getBlockMsg('canImportPackage')});return;}
+      if(precheck.needConfirm&&!options.confirmOverwrite){
+        resolve({ok:false,msg:'存在冲突项需要确认覆盖，请先确认'});return;
+      }
+      var incomingScenarios=pkg.isBundle?(pkg.scenarios||[]):(pkg.scenario?[pkg.scenario]:[]);
+      var existingScenarios=Store.getReplayScenarios();
+      var existingExecutions=Store.getReplayExecutions();
+      var conflictIds=precheck.conflicts.filter(function(c){return c.type===REPLAY_CONFLICT_TYPES.DUPLICATE&&!c.isSame&&!options.confirmOverwrite}).map(function(c){return c.itemId});
+      var importedScenarios=[];
+      var skippedScenarios=[];
+      var failedScenarios=[];
+      var importedExecutions=0;
+      var pkgExecMap={};
+      (pkg.executions||[]).forEach(function(e){pkgExecMap[e.id]=e;});
+      incomingScenarios.forEach(function(s){
+        if(conflictIds.indexOf(s.id)>-1){
+          skippedScenarios.push({id:s.id,name:s.name,reason:'存在冲突且未确认覆盖'});
+          return;
+        }
+        try{
+          var idx=existingScenarios.findIndex(function(es){return es.id===s.id});
+          var importedS=JSON.parse(JSON.stringify(s));
+          importedS.updatedAt=now();
+          importedS.updatedBy=handler||'系统';
+          if(idx>-1){
+            if(options.confirmOverwrite){
+              importedS.createdAt=existingScenarios[idx].createdAt;
+              importedS.createdBy=existingScenarios[idx].createdBy;
+              existingScenarios[idx]=importedS;
+            }else{
+              skippedScenarios.push({id:s.id,name:s.name,reason:'ID已存在，跳过'});
+              return;
+            }
+          }else{
+            importedS.createdAt=now();
+            importedS.createdBy=handler||'系统';
+            existingScenarios.unshift(importedS);
+          }
+          importedScenarios.push({id:s.id,name:s.name,overwritten:idx>-1&&options.confirmOverwrite});
+          var execIds=[];
+          (pkg.executions||[]).forEach(function(e){
+            if(e.scenarioId===s.id){execIds.push(e.id);}
+          });
+          execIds.forEach(function(eid){
+            var e=pkgExecMap[eid];
+            if(e){
+              var eidx=existingExecutions.findIndex(function(ee){return ee.id===eid});
+              if(eidx===-1){
+                existingExecutions.push(JSON.parse(JSON.stringify(e)));
+                importedExecutions++;
+              }
+            }
+          });
+        }catch(err){
+          failedScenarios.push({id:s.id,name:s.name,error:err.message});
+        }
+      });
+      Store.saveReplayScenarios(existingScenarios);
+      Store.saveReplayExecutions(existingExecutions);
+      resolve({
+        ok:true,
+        summary:{
+          totalScenarios:incomingScenarios.length,
+          importedScenarios:importedScenarios.length,
+          skippedScenarios:skippedScenarios.length,
+          failedScenarios:failedScenarios.length,
+          importedExecutions:importedExecutions,
+          importedList:importedScenarios,
+          skippedList:skippedScenarios,
+          failedList:failedScenarios
+        }
+      });
+    });
+  }
+};
+
+var ScenarioDiffEngine={
+  compareExecutions:function(execIdA,execIdB){
+    var a=ScenarioExecutionEngine.getExecutionById(execIdA);
+    var b=ScenarioExecutionEngine.getExecutionById(execIdB);
+    if(!a||!b)return{ok:false,msg:'执行批次不存在'};
+    if(a.scenarioId!==b.scenarioId)return{ok:false,msg:'两次执行不属于同一演练，无法对比'};
+    var diff={
+      executionA:{id:a.id,batchNo:a.batchNo,handler:a.handler,startedAt:a.startedAt,status:a.status,completedSteps:a.completedSteps,failedSteps:a.failedSteps},
+      executionB:{id:b.id,batchNo:b.batchNo,handler:b.handler,startedAt:b.startedAt,status:b.status,completedSteps:b.completedSteps,failedSteps:b.failedSteps},
+      summary:{
+        statusDiff:a.status!==b.status,
+        completedDiff:a.completedSteps-b.completedSteps,
+        failedDiff:a.failedSteps-b.failedSteps,
+        newPassesInB:[],
+        newFailuresInB:[],
+        sameSuccess:[],
+        sameFailure:[]
+      },
+      stepDiffs:[],
+      snapshotDiff:this._compareSnapshots(a.snapshots.after,b.snapshots.after)
+    };
+    var logsA={};
+    var logsB={};
+    (a.stepLogs||[]).forEach(function(l){logsA[l.stepIndex]=l;});
+    (b.stepLogs||[]).forEach(function(l){logsB[l.stepIndex]=l;});
+    var maxSteps=Math.max(a.totalSteps||0,b.totalSteps||0);
+    for(var i=1;i<=maxSteps;i++){
+      var la=logsA[i];var lb=logsB[i];
+      var item={stepIndex:i,stepName:la?la.stepName:(lb?lb.stepName:('步骤'+i))};
+      if(la&&lb){
+        item.statusA=la.status;item.statusB=lb.status;
+        item.isSame=la.status===lb.status;
+        item.msgA=la.detail||la.error||'';
+        item.msgB=lb.detail||lb.error||'';
+        item.hasMsgDiff=item.msgA!==item.msgB;
+        if(la.status==='success'&&lb.status==='success')diff.summary.sameSuccess.push(i);
+        else if(la.status==='failed'&&lb.status==='failed')diff.summary.sameFailure.push(i);
+        else if(la.status==='failed'&&lb.status==='success')diff.summary.newPassesInB.push(i);
+        else if(la.status==='success'&&lb.status==='failed')diff.summary.newFailuresInB.push(i);
+      }else if(la){
+        item.statusA=la.status;item.statusB='missing';item.isSame=false;
+        item.msgA=la.detail||la.error||'';item.msgB='B中无此步骤';item.hasMsgDiff=true;
+        if(la.status==='success')diff.summary.newFailuresInB.push(i);
+      }else if(lb){
+        item.statusA='missing';item.statusB=lb.status;item.isSame=false;
+        item.msgA='A中无此步骤';item.msgB=lb.detail||lb.error||'';item.hasMsgDiff=true;
+        if(lb.status==='success')diff.summary.newPassesInB.push(i);
+      }
+      diff.stepDiffs.push(item);
+    }
+    return{ok:true,diff:diff};
+  },
+  _compareSnapshots:function(snapA,snapB){
+    var result={ordersDiff:[],quotesDiff:[],historyDiff:[]};
+    if(!snapA||!snapB)return result;
+    var ordersA=snapA.orders||[];var ordersB=snapB.orders||[];
+    var oaMap={};ordersA.forEach(function(o){oaMap[o.id]=o;});
+    ordersB.forEach(function(o){
+      var oa=oaMap[o.id];
+      if(oa){
+        if(oa.currentStatus!==o.currentStatus){
+          result.ordersDiff.push({type:'changed',id:o.id,name:o.orderNo,
+            field:'currentStatus',from:oa.currentStatus,to:o.currentStatus});
+        }
+      }else{
+        result.ordersDiff.push({type:'added_in_b',id:o.id,name:o.orderNo});
+      }
+    });
+    ordersA.forEach(function(o){
+      if(!ordersB.some(function(x){return x.id===o.id;})){
+        result.ordersDiff.push({type:'missing_in_b',id:o.id,name:o.orderNo});
+      }
+    });
+    return result;
+  }
+};
+
+var ReplayStateManager={
+  save:function(state){
+    Store.saveReplayState(Object.assign({savedAt:now()},state));
+  },
+  load:function(){return Store.getReplayState();},
+  saveDetailView:function(view){
+    Store.saveReplayDetailView(Object.assign({savedAt:now()},view));
+  },
+  loadDetailView:function(){return Store.getReplayDetailView();}
+};
+
+var _replayTmpImportData=null;
+var _replayTmpPrecheck=null;
+var _replayCompareIds={a:null,b:null};
+
+function renderReplayStage(){
+  var el=document.getElementById('page-replay-stage');
+  if(!el)return;
+  var state=ReplayStateManager.load();
+  var permCfg=PermissionManager.getConfig();
+  var roleLabel={admin:'管理员',operator:'操作员',viewer:'只读用户'};
+  if(!UI._replayCurrentTab)UI._replayCurrentTab='scenarios';
+  if(!UI._replayFilters)UI._replayFilters={status:'',keyword:'',createdBy:''};
+  if(!UI._replaySelectedScenarioId)UI._replaySelectedScenarioId=null;
+  if(!UI._replayDetailSubTab)UI._replayDetailSubTab='info';
+  if(!UI._replayCurrentDraftId)UI._replayCurrentDraftId=null;
+  if(state){
+    if(state.currentTab)UI._replayCurrentTab=state.currentTab;
+    if(state.filters)UI._replayFilters=state.filters;
+    if(state.selectedScenarioId)UI._replaySelectedScenarioId=state.selectedScenarioId;
+    if(state.detailSubTab)UI._replayDetailSubTab=state.detailSubTab;
+    if(state.currentDraftId)UI._replayCurrentDraftId=state.currentDraftId;
+  }
+  var dvs=ReplayStateManager.loadDetailView();
+  if(dvs&&dvs.subTab)UI._replayDetailSubTab=dvs.subTab;
+  var tabsHtml='<div class="tabs">'+
+    '<button class="tab-btn '+(UI._replayCurrentTab==='scenarios'?'active':'')+'" onclick="window.AppReplaySwitchTab(\'scenarios\')">🎬 演练场景</button>'+
+    '<button class="tab-btn '+(UI._replayCurrentTab==='drafts'?'active':'')+'" onclick="window.AppReplaySwitchTab(\'drafts\')">📝 草稿箱 ('+Store.getReplayDrafts().length+')</button>'+
+    '<button class="tab-btn '+(UI._replayCurrentTab==='compare'?'active':'')+'" onclick="window.AppReplaySwitchTab(\'compare\')">🔍 执行对比</button>'+
+    '<button class="tab-btn '+(UI._replayCurrentTab==='package'?'active':'')+'" onclick="window.AppReplaySwitchTab(\'package\')">📦 导入/导出包</button>'+
+    '<div style="margin-left:auto;display:flex;align-items:center;gap:12px;padding:0 12px;color:var(--text-secondary);font-size:13px">'+
+      '<span>👤 当前角色：<strong style="color:var(--text-primary)">'+(roleLabel[permCfg.currentRole]||permCfg.currentRole)+'</strong></span>'+
+      '<button class="btn btn-sm btn-primary" onclick="window.AppReplayShowPermSwitch()">🔐 切换角色</button>'+
+    '</div></div>';
+  var contentHtml='';
+  switch(UI._replayCurrentTab){
+    case'scenarios':contentHtml=UI._renderReplayScenariosList();break;
+    case'drafts':contentHtml=UI._renderReplayDraftsList();break;
+    case'compare':contentHtml=UI._renderReplayCompareView();break;
+    case'package':contentHtml=UI._renderReplayPackageView();break;
+    case'detail':contentHtml=UI._renderReplayScenarioDetail();break;
+    case'editor':contentHtml=UI._renderReplayScenarioEditor();break;
+    case'exec-detail':contentHtml=UI._renderReplayExecutionDetail();break;
+    default:contentHtml=UI._renderReplayScenariosList();
+  }
+  var restoreBanner='';
+  if(state&&state.selectedScenarioId&&UI._replayCurrentTab==='scenarios'){
+    var restoredS=ScenarioEngine.getById(state.selectedScenarioId);
+    if(restoredS){
+      restoreBanner='<div class="alert alert-info" style="margin-bottom:16px">'+
+        '💡 已恢复上次打开的演练：<strong>'+esc(restoredS.name)+'</strong>'+
+        (state.filters&&(state.filters.keyword||state.filters.status)?'，筛选条件也已恢复':'')+
+        ' <button class="btn btn-sm btn-ghost" onclick="window.AppReplayClearRestore()">清除恢复</button></div>';
+    }
+  }
+  el.innerHTML=
+    '<div class="page-header"><h2>🎬 回放演练台</h2><p>把已准入数据组合成可反复执行的服务流程场景，支持草稿、导入导出、执行快照与差异对比</p></div>'+
+    restoreBanner+tabsHtml+'<div id="replay-content">'+contentHtml+'</div>';
+  if(state&&UI._replayCurrentTab==='scenarios'&&UI._replayFilters){
+    UI._applyReplayFilters();
+  }
+}
+
+UI.renderReplayStage=renderReplayStage;
+
+UI._renderReplayScenariosList=function(){
+  var self=this;
+  var filters=UI._replayFilters||{};
+  var scenarios=ScenarioEngine.list(filters);
+  var canCreate=ReplayPermission.canCreate();
+  var canExport=ReplayPermission.canExport();
+  var canImport=ReplayPermission.canImport();
+  var filterHtml='<div class="filter-bar">'+
+    '<select id="replay-filter-status" onchange="window.AppReplayFilterChange()">'+
+      '<option value="">全部状态</option>'+
+      '<option value="'+REPLAY_SCENARIO_STATUS.DRAFT+'" '+(filters.status===REPLAY_SCENARIO_STATUS.DRAFT?'selected':'')+'>草稿</option>'+
+      '<option value="'+REPLAY_SCENARIO_STATUS.PUBLISHED+'" '+(filters.status===REPLAY_SCENARIO_STATUS.PUBLISHED?'selected':'')+'>已发布</option>'+
+      '<option value="'+REPLAY_SCENARIO_STATUS.ARCHIVED+'" '+(filters.status===REPLAY_SCENARIO_STATUS.ARCHIVED?'selected':'')+'>已归档</option>'+
+    '</select>'+
+    '<input type="text" id="replay-filter-keyword" placeholder="搜索演练名称/描述..." value="'+esc(filters.keyword||'')+'" oninput="window.AppReplayFilterChange()">'+
+    '<input type="text" id="replay-filter-creator" placeholder="搜索创建人..." value="'+esc(filters.createdBy||'')+'" oninput="window.AppReplayFilterChange()">'+
+    '<button class="btn btn-ghost" onclick="window.AppReplayClearFilters()" style="margin-left:auto">清除筛选</button>'+
+    (canCreate?'<button class="btn btn-primary" onclick="window.AppReplayShowNewModal()">+ 新建演练</button>':'')+
+  '</div>';
+  if(!scenarios.length){
+    return filterHtml+'<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">🎬</div><p>暂无演练场景，'+(canCreate?'点击上方按钮新建':'请联系管理员创建')+'</p></div></div></div>';
+  }
+  var statusBadge={};
+  statusBadge[REPLAY_SCENARIO_STATUS.DRAFT]='badge-registered';
+  statusBadge[REPLAY_SCENARIO_STATUS.PUBLISHED]='badge-completed';
+  statusBadge[REPLAY_SCENARIO_STATUS.ARCHIVED]='badge-terminated';
+  var rows=scenarios.map(function(s){
+    var execs=Store.getReplayExecutionsByScenarioId(s.id);
+    var lastExec=execs.length>0?execs[0]:null;
+    return '<tr class="clickable-row" onclick="window.AppReplayViewDetail(\''+s.id+'\')">'+
+      '<td><span class="order-no">'+esc(s.name)+'</span></td>'+
+      '<td><span class="badge '+(statusBadge[s.status]||'')+'">'+(REPLAY_SCENARIO_STATUS_LABELS[s.status]||s.status)+'</span></td>'+
+      '<td>v'+esc(s.version||'1.0.0')+'</td>'+
+      '<td>'+(s.steps?s.steps.length:0)+' 步</td>'+
+      '<td>'+esc(s.createdBy||'-')+'</td>'+
+      '<td>'+s.executionCount+' 次</td>'+
+      '<td>'+formatDateTime(s.lastExecutedAt)+'</td>'+
+      '<td>'+formatDateTime(s.updatedAt)+'</td>'+
+      '<td onclick="event.stopPropagation()">'+
+        '<button class="btn btn-sm btn-primary" onclick="window.AppReplayViewDetail(\''+s.id+'\')">查看</button>'+
+        (ReplayPermission.canExecute()?'<button class="btn btn-sm btn-success" onclick="window.AppReplayShowExecuteModal(\''+s.id+'\')" style="margin-left:4px">▶ 执行</button>':'')+
+        (canExport?'<button class="btn btn-sm" onclick="window.AppReplayExportSingle(\''+s.id+'\')" style="margin-left:4px">📤 导出</button>':'')+
+        (ReplayPermission.canDelete()?'<button class="btn btn-sm btn-danger" onclick="window.AppReplayDeleteScenario(\''+s.id+'\')" style="margin-left:4px">删除</button>':'')+
+      '</td></tr>';
+  }).join('');
+  return filterHtml+
+    '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+      '<thead><tr><th>演练名称</th><th>状态</th><th>版本</th><th>步骤数</th><th>创建人</th><th>执行次数</th><th>最近执行</th><th>更新时间</th><th>操作</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderReplayScenarioDetail=function(){
+  var s=ScenarioEngine.getById(UI._replaySelectedScenarioId);
+  var canEdit=ReplayPermission.canEdit();
+  var canExecute=ReplayPermission.canExecute();
+  var canExport=ReplayPermission.canExport();
+  var canRollback=ReplayPermission.canRollback();
+  if(!s)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">❌</div><p>演练不存在</p></div></div></div>';
+  var statusBadge={};
+  statusBadge[REPLAY_SCENARIO_STATUS.DRAFT]='badge-registered';
+  statusBadge[REPLAY_SCENARIO_STATUS.PUBLISHED]='badge-completed';
+  statusBadge[REPLAY_SCENARIO_STATUS.ARCHIVED]='badge-terminated';
+  var execs=ScenarioExecutionEngine.listExecutions({scenarioId:s.id});
+  var subTabs='<div class="tabs" style="margin-bottom:16px">'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='info'?'active':'')+'" onclick="window.AppReplayDetailSubTab(\'info\')">📋 基本信息</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='steps'?'active':'')+'" onclick="window.AppReplayDetailSubTab(\'steps\')">📝 步骤定义 ('+(s.steps?s.steps.length:0)+')</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='executions'?'active':'')+'" onclick="window.AppReplayDetailSubTab(\'executions\')">⚡ 执行记录 ('+execs.length+')</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='seed'?'active':'')+'" onclick="window.AppReplayDetailSubTab(\'seed\')">🌱 种子数据</button>'+
+  '</div>';
+  var actionHtml='<div class="action-bar">'+
+    '<button class="btn" onclick="window.AppReplayBackToList()">← 返回列表</button>'+
+    (canExecute?'<button class="btn btn-success" onclick="window.AppReplayShowExecuteModal(\''+s.id+'\')">▶ 开始执行演练</button>':'')+
+    (canEdit?'<button class="btn btn-primary" onclick="window.AppReplayEditScenario(\''+s.id+'\')">✏️ 编辑演练</button>':'')+
+    (canExport?'<button class="btn" onclick="window.AppReplayExportSingle(\''+s.id+'\')">📤 导出演练包</button>':'')+
+    (s.status===REPLAY_SCENARIO_STATUS.DRAFT&&canEdit?'<button class="btn btn-warning" onclick="window.AppReplayPublish(\''+s.id+'\')" style="margin-left:4px">🚀 发布</button>':'')+
+  '</div>';
+  var subContent='';
+  switch(UI._replayDetailSubTab){
+    case'info':subContent=this._renderReplayDetailInfo(s);break;
+    case'steps':subContent=this._renderReplayDetailSteps(s);break;
+    case'executions':subContent=this._renderReplayDetailExecutions(s,execs,canRollback);break;
+    case'seed':subContent=this._renderReplayDetailSeed(s);break;
+    default:subContent=this._renderReplayDetailInfo(s);
+  }
+  return actionHtml+
+    '<div class="detail-section"><h4>🎬 演练基本信息</h4><div class="detail-grid">'+
+      '<div class="detail-item"><span class="detail-label">演练名称</span><span class="detail-value"><strong>'+esc(s.name)+'</strong></span></div>'+
+      '<div class="detail-item"><span class="detail-label">状态</span><span class="detail-value"><span class="badge '+(statusBadge[s.status]||'')+'">'+(REPLAY_SCENARIO_STATUS_LABELS[s.status]||s.status)+'</span></span></div>'+
+      '<div class="detail-item"><span class="detail-label">版本号</span><span class="detail-value">v'+esc(s.version||'1.0.0')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">创建人</span><span class="detail-value">'+esc(s.createdBy||'-')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">创建时间</span><span class="detail-value">'+formatDateTime(s.createdAt)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">更新人</span><span class="detail-value">'+esc(s.updatedBy||'-')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">更新时间</span><span class="detail-value">'+formatDateTime(s.updatedAt)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">执行次数</span><span class="detail-value">'+s.executionCount+' 次</span></div>'+
+      '<div class="detail-item"><span class="detail-label">最近执行</span><span class="detail-value">'+formatDateTime(s.lastExecutedAt)+'</span></div>'+
+      (s.tags&&s.tags.length?'<div class="detail-item"><span class="detail-label">标签</span><span class="detail-value">'+s.tags.map(function(t){return '<span class="badge badge-inspecting" style="margin:2px">'+esc(t)+'</span>'}).join('')+'</span></div>':'')+
+      '<div class="detail-item" style="grid-column:1 / -1"><span class="detail-label">描述</span><span class="detail-value">'+esc(s.description||'无描述')+'</span></div>'+
+    '</div></div>'+subTabs+subContent;
+};
+
+UI._renderReplayDetailInfo=function(s){
+  var execs=ScenarioExecutionEngine.listExecutions({scenarioId:s.id});
+  var succCount=execs.filter(function(e){return e.status===REPLAY_EXECUTION_STATUS.COMPLETED}).length;
+  var partialCount=execs.filter(function(e){return e.status===REPLAY_EXECUTION_STATUS.PARTIAL}).length;
+  var failCount=execs.filter(function(e){return e.status===REPLAY_EXECUTION_STATUS.FAILED}).length;
+  var rbCount=execs.filter(function(e){return e.status===REPLAY_EXECUTION_STATUS.ROLLED_BACK}).length;
+  return '<div class="stats-grid">'+
+    '<div class="stat-card"><div class="stat-icon">📝</div><div class="stat-label">演练步骤数</div><div class="stat-value">'+(s.steps?s.steps.length:0)+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">🌱</div><div class="stat-label">种子工单数</div><div class="stat-value">'+((s.seedData&&s.seedData.orders)?s.seedData.orders.length:0)+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">✅</div><div class="stat-label">完全成功</div><div class="stat-value">'+succCount+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">⚠️</div><div class="stat-label">部分成功</div><div class="stat-value">'+partialCount+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">❌</div><div class="stat-label">全部失败</div><div class="stat-value">'+failCount+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">↩️</div><div class="stat-label">已撤销</div><div class="stat-value">'+rbCount+'</div></div>'+
+  '</div>';
+};
+
+UI._renderReplayDetailSteps=function(s){
+  if(!s.steps||s.steps.length===0)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📝</div><p>暂无步骤定义</p></div></div></div>';
+  var rows=s.steps.map(function(st,idx){
+    var typeLabel=REPLAY_STEP_TYPE_LABELS[st.type]||st.type;
+    var extra='';
+    if(st.orderId)extra+='工单ID:'+st.orderId+' ';
+    if(st.targetStatus)extra+='→'+STATUS_LABELS[st.targetStatus]+' ';
+    if(st.reason)extra+='原因:'+st.reason+' ';
+    return '<tr><td>'+(idx+1)+'</td><td><span class="badge badge-inspecting">'+typeLabel+'</span></td>'+
+      '<td>'+esc(extra)+'</td><td>'+esc(st.note||'-')+'</td></tr>';
+  }).join('');
+  return '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+    '<thead><tr><th>序号</th><th>步骤类型</th><th>参数</th><th>备注</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderReplayDetailExecutions=function(s,execs,canRollback){
+  if(!execs.length)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">⚡</div><p>暂无执行记录，点击「开始执行演练」创建首次执行</p></div></div></div>';
+  var statusBadge={};
+  statusBadge[REPLAY_EXECUTION_STATUS.PENDING]='badge-registered';
+  statusBadge[REPLAY_EXECUTION_STATUS.RUNNING]='badge-inspecting';
+  statusBadge[REPLAY_EXECUTION_STATUS.COMPLETED]='badge-completed';
+  statusBadge[REPLAY_EXECUTION_STATUS.PARTIAL]='badge-quoted';
+  statusBadge[REPLAY_EXECUTION_STATUS.FAILED]='badge-terminated';
+  statusBadge[REPLAY_EXECUTION_STATUS.ROLLED_BACK]='badge-terminated';
+  var rows=execs.map(function(e){
+    return '<tr class="clickable-row" onclick="window.AppReplayViewExecDetail(\''+e.id+'\')">'+
+      '<td><span class="order-no">'+e.batchNo+'</span></td>'+
+      '<td><span class="badge '+(statusBadge[e.status]||'')+'">'+(REPLAY_EXECUTION_STATUS_LABELS[e.status]||e.status)+'</span></td>'+
+      '<td>成功 '+e.completedSteps+' / 失败 '+e.failedSteps+' / 跳过 '+e.skippedSteps+'</td>'+
+      '<td>'+esc(e.handler||'-')+'</td>'+
+      '<td>'+formatDateTime(e.startedAt)+'</td>'+
+      '<td>'+formatDateTime(e.finishedAt)+'</td>'+
+      '<td onclick="event.stopPropagation()">'+
+        '<button class="btn btn-sm btn-primary" onclick="window.AppReplayViewExecDetail(\''+e.id+'\')">查看</button>'+
+        (canRollback&&e.status!==REPLAY_EXECUTION_STATUS.ROLLED_BACK&&e.status!==REPLAY_EXECUTION_STATUS.PENDING&&e.status!==REPLAY_EXECUTION_STATUS.RUNNING?'<button class="btn btn-sm btn-warning" onclick="window.AppReplayShowRollbackModal(\''+e.id+'\')" style="margin-left:4px">↩ 撤销</button>':'')+
+      '</td></tr>';
+  }).join('');
+  return '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+    '<thead><tr><th>批次号</th><th>状态</th><th>执行结果</th><th>操作人</th><th>开始时间</th><th>结束时间</th><th>操作</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderReplayDetailSeed=function(s){
+  var sd=s.seedData||{};
+  var orders=sd.orders||[];
+  var quotes=sd.quotes||[];
+  var history=sd.history||[];
+  return '<div class="detail-grid">'+
+    '<div class="detail-item"><span class="detail-label">种子工单</span><span class="detail-value">'+orders.length+' 条</span></div>'+
+    '<div class="detail-item"><span class="detail-label">种子报价</span><span class="detail-value">'+quotes.length+' 条</span></div>'+
+    '<div class="detail-item"><span class="detail-label">种子历史</span><span class="detail-value">'+history.length+' 条</span></div>'+
+  '</div>'+(orders.length?
+    '<div class="card" style="margin-top:16px"><div class="card-body"><div class="section-title">种子工单列表</div><div class="table-wrap"><table>'+
+      '<thead><tr><th>工单号</th><th>客户</th><th>设备</th><th>初始状态</th></tr></thead><tbody>'+
+      orders.map(function(o){return '<tr><td>'+esc(o.orderNo||o.id)+'</td><td>'+esc(o.customerName||'-')+'</td><td>'+esc(o.deviceBrand||'')+' '+esc(o.deviceModel||'')+'</td><td><span class="badge badge-registered">'+(STATUS_LABELS[o.currentStatus]||o.currentStatus)+'</span></td></tr>'}).join('')+
+    '</tbody></table></div></div></div>':'<div class="empty-state"><div class="empty-icon">🌱</div><p>暂无种子数据，执行时将按步骤动态创建</p></div>');
+};
+
+UI._renderReplayDraftsList=function(){
+  var drafts=DraftEngine.list();
+  var canManage=ReplayPermission.canManageDrafts();
+  if(!canManage)return '<div class="alert alert-error">⛔ 当前角色没有管理草稿的权限</div>';
+  if(!drafts.length)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📝</div><p>暂无草稿，在编辑器中点击「保存草稿」可创建</p></div></div></div>';
+  var rows=drafts.map(function(d){
+    return '<tr class="clickable-row" onclick="window.AppReplayOpenDraft(\''+d.id+'\')">'+
+      '<td><span class="order-no">'+esc(d.name)+'</span></td>'+
+      '<td>v'+esc(d.version||'1.0.0')+'</td>'+
+      '<td>'+(d.steps?d.steps.length:0)+' 步</td>'+
+      '<td>'+esc(d.updatedBy||'-')+'</td>'+
+      '<td>'+formatDateTime(d.updatedAt)+'</td>'+
+      '<td onclick="event.stopPropagation()">'+
+        '<button class="btn btn-sm btn-primary" onclick="window.AppReplayOpenDraft(\''+d.id+'\')">编辑</button>'+
+        '<button class="btn btn-sm btn-success" onclick="window.AppReplayPublishDraft(\''+d.id+'\')" style="margin-left:4px">🚀 发布</button>'+
+        '<button class="btn btn-sm btn-danger" onclick="window.AppReplayDeleteDraft(\''+d.id+'\')" style="margin-left:4px">删除</button>'+
+      '</td></tr>';
+  }).join('');
+  return '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+    '<thead><tr><th>草稿名称</th><th>版本</th><th>步骤数</th><th>更新人</th><th>更新时间</th><th>操作</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderReplayScenarioEditor=function(){
+  var isEdit=!!UI._replaySelectedScenarioId;
+  var s=null;
+  var draft=null;
+  if(isEdit){
+    s=ScenarioEngine.getById(UI._replaySelectedScenarioId);
+  }else if(UI._replayCurrentDraftId){
+    draft=DraftEngine.getById(UI._replayCurrentDraftId);
+    s=draft;
+  }
+  var seedOrders=(s&&s.seedData&&s.seedData.orders)||[];
+  var steps=(s&&s.steps)||[];
+  var actionHtml='<div class="action-bar">'+
+    '<button class="btn" onclick="window.AppReplayBackToList()">← 返回</button>'+
+    '<button class="btn btn-primary" onclick="window.AppReplaySaveEditor()">💾 '+(isEdit?'保存修改':'保存为正式演练')+'</button>'+
+    '<button class="btn btn-warning" onclick="window.AppReplaySaveDraft()" style="margin-left:4px">📝 保存草稿</button>'+
+    '<button class="btn btn-success" onclick="window.AppReplayPreviewSteps()" style="margin-left:4px">👁 预览步骤</button>'+
+  '</div>';
+  var stepOpts='';
+  Object.keys(REPLAY_STEP_TYPE_LABELS).forEach(function(k){stepOpts+='<option value="'+k+'">'+REPLAY_STEP_TYPE_LABELS[k]+'</option>';});
+  var orderOpts='';
+  Store.getOrders().forEach(function(o){orderOpts+='<option value="'+o.id+'">'+o.orderNo+' ('+o.customerName+')</option>';});
+  var statusOpts=STATUS_FLOW.map(function(s){return '<option value="'+s+'">'+STATUS_LABELS[s]+'</option>'}).join('');
+  return actionHtml+
+    '<div class="card" style="margin-bottom:16px"><div class="card-body">'+
+      '<h4 style="margin-bottom:12px">📋 基本信息</h4>'+
+      '<div class="form-row">'+
+        '<div class="form-group"><label>演练名称 *</label><input type="text" id="rp-name" value="'+esc(s?s.name:'')+'" placeholder="如：标准维修全流程"></div>'+
+        '<div class="form-group"><label>版本号</label><input type="text" id="rp-version" value="'+esc(s?(s.version||'1.0.0'):'1.0.0')+'"></div>'+
+      '</div>'+
+      '<div class="form-group"><label>描述</label><textarea id="rp-description" placeholder="描述演练目的和场景...">'+esc(s?s.description:'')+'</textarea></div>'+
+      '<div class="form-group"><label>标签（逗号分隔）</label><input type="text" id="rp-tags" value="'+esc(s&&s.tags?s.tags.join(','):'')+'"></div>'+
+    '</div></div>'+
+    '<div class="card" style="margin-bottom:16px"><div class="card-body">'+
+      '<h4 style="margin-bottom:12px">🌱 种子工单（可选，执行前预置到系统）</h4>'+
+      '<div id="rp-seed-orders">'+seedOrders.map(function(o,i){
+        return '<div class="card" style="margin-bottom:8px;padding:12px;background:var(--bg)"><div class="form-row-3">'+
+          '<div class="form-group"><label>客户姓名</label><input type="text" class="rp-seed-name" value="'+esc(o.customerName||'')+'"></div>'+
+          '<div class="form-group"><label>联系电话</label><input type="text" class="rp-seed-phone" value="'+esc(o.customerPhone||'')+'"></div>'+
+          '<div class="form-group"><label>设备类型</label><input type="text" class="rp-seed-type" value="'+esc(o.deviceType||'笔记本')+'"></div>'+
+          '</div><div class="form-row-3">'+
+          '<div class="form-group"><label>品牌</label><input type="text" class="rp-seed-brand" value="'+esc(o.deviceBrand||'')+'"></div>'+
+          '<div class="form-group"><label>型号</label><input type="text" class="rp-seed-model" value="'+esc(o.deviceModel||'')+'"></div>'+
+          '<div class="form-group"><label>初始状态</label><select class="rp-seed-status">'+STATUS_FLOW.map(function(st){return '<option value="'+st+'" '+(o.currentStatus===st?'selected':'')+'>'+STATUS_LABELS[st]+'</option>'}).join('')+'</select></div>'+
+          '</div><div class="form-group"><label>故障描述</label><textarea class="rp-seed-fault">'+esc(o.faultDescription||'')+'</textarea></div>'+
+          '<button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">✕ 移除此工单</button></div>';
+      }).join('')+'</div>'+
+      '<button class="btn btn-sm" onclick="window.AppReplayAddSeedOrder()" style="margin-top:8px">+ 添加工单</button>'+
+    '</div></div>'+
+    '<div class="card"><div class="card-body">'+
+      '<h4 style="margin-bottom:12px">📝 演练步骤（按顺序执行）</h4>'+
+      '<div id="rp-steps">'+steps.map(function(st,i){return UI._renderEditorStepRow(st,i+1,orderOpts,statusOpts,stepOpts);}).join('')+'</div>'+
+      '<button class="btn btn-sm btn-primary" onclick="window.AppReplayAddStep()" style="margin-top:8px">+ 添加步骤</button>'+
+    '</div></div>';
+};
+
+UI._renderEditorStepRow=function(st,idx,orderOpts,statusOpts,stepOpts){
+  return '<div class="card" style="margin-bottom:12px;padding:16px;background:var(--bg);border-left:4px solid var(--primary)">'+
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'+
+      '<strong style="min-width:60px">步骤 '+idx+'</strong>'+
+      '<select class="rp-step-type" onchange="window.AppReplayStepTypeChange(this)" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius)">'+
+        Object.keys(REPLAY_STEP_TYPE_LABELS).map(function(k){return '<option value="'+k+'" '+(st.type===k?'selected':'')+'>'+REPLAY_STEP_TYPE_LABELS[k]+'</option>'}).join('')+
+      '</select>'+
+      '<button class="btn btn-sm btn-danger" onclick="this.closest(\'.card\').remove();window.AppReplayReindexSteps()">✕ 删除</button>'+
+    '</div>'+
+    '<div class="rp-step-params">'+UI._renderStepParams(st,orderOpts,statusOpts)+'</div>'+
+    '<div class="form-group" style="margin-top:8px"><label>步骤备注</label><input type="text" class="rp-step-note" value="'+esc(st.note||'')+'" placeholder="可选，记录在步骤日志中"></div>'+
+  '</div>';
+};
+
+UI._renderStepParams=function(st,orderOpts,statusOpts){
+  var t=st.type||REPLAY_STEP_TYPES.CREATE_ORDER;
+  switch(t){
+    case REPLAY_STEP_TYPES.CREATE_ORDER:
+      return '<div class="form-row"><div class="form-group"><label>客户姓名</label><input type="text" class="rp-sp-customer" value="'+esc((st.orderData&&st.orderData.customerName)||'演练客户')+'"></div><div class="form-group"><label>设备类型</label><input type="text" class="rp-sp-type" value="'+esc((st.orderData&&st.orderData.deviceType)||'笔记本')+'"></div></div><div class="form-row"><div class="form-group"><label>品牌</label><input type="text" class="rp-sp-brand" value="'+esc((st.orderData&&st.orderData.deviceBrand)||'演练品牌')+'"></div><div class="form-group"><label>故障</label><input type="text" class="rp-sp-fault" value="'+esc((st.orderData&&st.orderData.faultDescription)||'演练故障')+'"></div></div>';
+    case REPLAY_STEP_TYPES.ADVANCE_ORDER:
+      return '<div class="form-row"><div class="form-group"><label>选择工单</label><select class="rp-sp-order">'+orderOpts+'</select></div><div class="form-group"><label>目标状态</label><select class="rp-sp-target">'+statusOpts+'</select></div></div>';
+    case REPLAY_STEP_TYPES.GENERATE_QUOTE:
+    case REPLAY_STEP_TYPES.CONFIRM_QUOTE:
+    case REPLAY_STEP_TYPES.START_REPAIR:
+    case REPLAY_STEP_TYPES.COMPLETE_REPAIR:
+    case REPLAY_STEP_TYPES.PICK_UP:
+    case REPLAY_STEP_TYPES.ROLLBACK:
+      return '<div class="form-group"><label>选择工单</label><select class="rp-sp-order">'+orderOpts+'</select></div>';
+    case REPLAY_STEP_TYPES.TERMINATE:
+      return '<div class="form-row"><div class="form-group"><label>选择工单</label><select class="rp-sp-order">'+orderOpts+'</select></div><div class="form-group"><label>终止原因 *</label><input type="text" class="rp-sp-reason" value="'+esc(st.reason||'演练终止')+'"></div></div>';
+    default:
+      return '<div style="color:var(--text-muted)">该步骤类型无需参数</div>';
+  }
+};
+
+UI._renderReplayCompareView=function(){
+  var execA=_replayCompareIds.a?ScenarioExecutionEngine.getExecutionById(_replayCompareIds.a):null;
+  var execB=_replayCompareIds.b?ScenarioExecutionEngine.getExecutionById(_replayCompareIds.b):null;
+  var allExecs=ScenarioExecutionEngine.listExecutions();
+  var execOptions=allExecs.map(function(e){
+    return '<option value="'+e.id+'">'+e.batchNo+' - '+e.scenarioName+' ('+REPLAY_EXECUTION_STATUS_LABELS[e.status]+', '+formatDateTime(e.startedAt)+')</option>';
+  }).join('');
+  var compareResult='';
+  if(execA&&execB){
+    var result=ScenarioDiffEngine.compareExecutions(execA.id,execB.id);
+    if(result.ok){
+      var d=result.diff;
+      compareResult='<div class="card" style="margin-top:16px"><div class="card-body">'+
+        '<h4 style="margin-bottom:12px">📊 对比结果摘要</h4>'+
+        '<div class="detail-grid">'+
+          '<div class="detail-item"><span class="detail-label">A批次状态</span><span class="detail-value">'+REPLAY_EXECUTION_STATUS_LABELS[d.executionA.status]+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">B批次状态</span><span class="detail-value">'+REPLAY_EXECUTION_STATUS_LABELS[d.executionB.status]+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">A成功/失败</span><span class="detail-value" style="color:var(--success)">'+d.executionA.completedSteps+'</span> / <span style="color:var(--danger)">'+d.executionA.failedSteps+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">B成功/失败</span><span class="detail-value" style="color:var(--success)">'+d.executionB.completedSteps+'</span> / <span style="color:var(--danger)">'+d.executionB.failedSteps+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">A→B 新通过</span><span class="detail-value" style="color:var(--success);font-weight:600">'+d.summary.newPassesInB.length+' 个步骤</span></div>'+
+          '<div class="detail-item"><span class="detail-label">A→B 新失败</span><span class="detail-value" style="color:var(--danger);font-weight:600">'+d.summary.newFailuresInB.length+' 个步骤</span></div>'+
+        '</div>'+
+        '<div style="margin-top:16px"><h5>步骤级对比明细</h5><div class="table-wrap" style="margin-top:8px"><table>'+
+          '<thead><tr><th>步骤</th><th>A状态</th><th>B状态</th><th>一致性</th><th>A详情</th><th>B详情</th></tr></thead><tbody>'+
+          d.stepDiffs.map(function(sd){
+            var iconA=sd.statusA==='success'?'✅':(sd.statusA==='failed'?'❌':(sd.statusA==='skipped'?'⚠️':'➖'));
+            var iconB=sd.statusB==='success'?'✅':(sd.statusB==='failed'?'❌':(sd.statusB==='skipped'?'⚠️':'➖'));
+            var cls=sd.isSame?'':' style="background:var(--warning-light)"';
+            return '<tr'+cls+'><td><strong>'+sd.stepName+'</strong> (#步'+sd.stepIndex+')</td><td>'+iconA+' '+(sd.statusA||'-')+'</td><td>'+iconB+' '+(sd.statusB||'-')+'</td><td>'+(sd.isSame?'<span class="badge badge-completed">一致</span>':'<span class="badge badge-terminated">不同</span>')+'</td><td>'+esc(sd.msgA||'-')+'</td><td>'+esc(sd.msgB||'-')+'</td></tr>';
+          }).join('')+
+        '</tbody></table></div></div>'+
+      '</div></div>';
+    }else{
+      compareResult='<div class="alert alert-error" style="margin-top:16px">❌ '+esc(result.msg)+'</div>';
+    }
+  }
+  return '<div class="card"><div class="card-body">'+
+    '<h4 style="margin-bottom:12px">🔍 选择两次执行进行对比</h4>'+
+    '<div class="form-row">'+
+      '<div class="form-group"><label>选择基准执行（A）</label><select id="rp-compare-a" onchange="window.AppReplaySetCompare(\'a\',this.value)"><option value="">请选择...</option>'+(execA?'<option value="'+execA.id+'" selected>'+execA.batchNo+'</option>':'')+execOptions+'</select></div>'+
+      '<div class="form-group"><label>选择对比执行（B）</label><select id="rp-compare-b" onchange="window.AppReplaySetCompare(\'b\',this.value)"><option value="">请选择...</option>'+(execB?'<option value="'+execB.id+'" selected>'+execB.batchNo+'</option>':'')+execOptions+'</select></div>'+
+    '</div>'+
+    (!execA||!execB?'<div class="alert alert-info">💡 选择两次同一演练场景的不同执行批次，查看步骤级差异</div>':'')+
+  '</div></div>'+compareResult;
+};
+
+UI._renderReplayPackageView=function(){
+  var canImport=ReplayPermission.canImport();
+  var canExport=ReplayPermission.canExport();
+  var scenarios=ScenarioEngine.list();
+  var scenarioOptions=scenarios.map(function(s){return '<option value="'+s.id+'">'+esc(s.name)+'</option>'}).join('');
+  var previewHtml='<div id="rp-import-preview"></div>';
+  return '<div class="card" style="margin-bottom:16px"><div class="card-body">'+
+    '<h4 style="margin-bottom:12px">📤 导出演练包</h4>'+
+    '<div class="form-group"><label>选择要导出的演练（按住 Ctrl 多选）</label><select id="rp-export-ids" multiple size="8">'+scenarioOptions+'</select></div>'+
+    (canExport?'<button class="btn btn-primary" onclick="window.AppReplayExportBundle()">📤 导出选中演练包</button>':'<div class="alert alert-error">⛔ 当前角色无导出权限</div>')+
+  '</div></div>'+
+  '<div class="card"><div class="card-body">'+
+    '<h4 style="margin-bottom:12px">📥 导入演练包（JSON）</h4>'+
+    (canImport?
+      '<div class="import-upload-area" onclick="document.getElementById(\'rp-import-file\').click()">'+
+        '<div class="upload-icon">📦</div><div class="upload-text">点击或拖拽演练包 JSON 文件到此处</div>'+
+        '<div class="upload-hint">导入时自动检测重复场景、缺字段、版本冲突，并在覆盖前要求确认</div>'+
+      '</div><input type="file" id="rp-import-file" accept=".json" style="display:none" onchange="window.AppReplayImportPreview(event)">'+
+      previewHtml+
+      '<div id="rp-import-actions" style="display:none;margin-top:16px">'+
+        '<button class="btn btn-primary" onclick="window.AppReplayConfirmImport(false)">✅ 导入（不覆盖）</button>'+
+        '<button class="btn btn-warning" onclick="window.AppReplayConfirmImport(true)" style="margin-left:8px">⚠️ 覆盖冲突项</button>'+
+        '<button class="btn" onclick="window.AppReplayCancelImport()" style="margin-left:8px">取消</button>'+
+      '</div>':
+      '<div class="alert alert-error">⛔ 当前角色无导入权限</div>')+
+  '</div></div>';
+};
+
+UI._renderReplayExecutionDetail=function(){
+  if(!UI._replaySelectedExecutionId)return '<div class="empty-state">未选择执行批次</div>';
+  var exec=ScenarioExecutionEngine.getExecutionById(UI._replaySelectedExecutionId);
+  if(!exec)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">❌</div><p>执行批次不存在</p></div></div></div>';
+  var s=ScenarioEngine.getById(exec.scenarioId);
+  var statusBadge={};
+  statusBadge[REPLAY_EXECUTION_STATUS.PENDING]='badge-registered';
+  statusBadge[REPLAY_EXECUTION_STATUS.RUNNING]='badge-inspecting';
+  statusBadge[REPLAY_EXECUTION_STATUS.COMPLETED]='badge-completed';
+  statusBadge[REPLAY_EXECUTION_STATUS.PARTIAL]='badge-quoted';
+  statusBadge[REPLAY_EXECUTION_STATUS.FAILED]='badge-terminated';
+  statusBadge[REPLAY_EXECUTION_STATUS.ROLLED_BACK]='badge-terminated';
+  var canRollback=ReplayPermission.canRollback()&&exec.status!==REPLAY_EXECUTION_STATUS.ROLLED_BACK&&exec.status!==REPLAY_EXECUTION_STATUS.PENDING&&exec.status!==REPLAY_EXECUTION_STATUS.RUNNING;
+  var subTabs='<div class="tabs" style="margin-bottom:16px">'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='summary'?'active':'')+'" onclick="window.AppReplayExecSubTab(\'summary\')">📊 执行摘要</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='steplogs'?'active':'')+'" onclick="window.AppReplayExecSubTab(\'steplogs\')">📝 步骤日志 ('+(exec.stepLogs?exec.stepLogs.length:0)+')</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='failures'?'active':'')+'" onclick="window.AppReplayExecSubTab(\'failures\')">❌ 失败明细 ('+(exec.failureDetails?exec.failureDetails.length:0)+')</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='remarks'?'active':'')+'" onclick="window.AppReplayExecSubTab(\'remarks\')">💬 操作人备注 ('+(exec.operatorRemarks?exec.operatorRemarks.length:0)+')</button>'+
+    '<button class="tab-btn '+(UI._replayDetailSubTab==='snapshots'?'active':'')+'" onclick="window.AppReplayExecSubTab(\'snapshots\')">📸 结果快照</button>'+
+  '</div>';
+  var actionHtml='<div class="action-bar">'+
+    '<button class="btn" onclick="window.AppReplayViewDetail(\''+exec.scenarioId+'\')">← 返回演练详情</button>'+
+    (canRollback?'<button class="btn btn-warning" onclick="window.AppReplayShowRollbackModal(\''+exec.id+'\')">↩ 按批次撤销（回滚写入）</button>':'')+
+    (exec.status===REPLAY_EXECUTION_STATUS.ROLLED_BACK?'<span class="badge badge-terminated">此批次已撤销</span>':'')+
+  '</div>';
+  var rollbackHtml=exec.rollbackInfo?'<div class="alert alert-warning" style="margin:16px 0">↩️ 撤销信息：'+esc(exec.rollbackInfo.handler)+' 于 '+formatDateTime(exec.rollbackInfo.rolledBackAt)+' 撤销，原因：'+esc(exec.rollbackInfo.reason||'无')+'</div>':'';
+  var subContent='';
+  switch(UI._replayDetailSubTab){
+    case'summary':subContent=this._renderExecSummary(exec,s,statusBadge);break;
+    case'steplogs':subContent=this._renderExecStepLogs(exec);break;
+    case'failures':subContent=this._renderExecFailures(exec);break;
+    case'remarks':subContent=this._renderExecRemarks(exec);break;
+    case'snapshots':subContent=this._renderExecSnapshots(exec);break;
+    default:subContent=this._renderExecSummary(exec,s,statusBadge);
+  }
+  return actionHtml+rollbackHtml+
+    '<div class="detail-section"><h4>⚡ 执行批次信息</h4><div class="detail-grid">'+
+      '<div class="detail-item"><span class="detail-label">批次号</span><span class="detail-value"><strong>'+exec.batchNo+'</strong></span></div>'+
+      '<div class="detail-item"><span class="detail-label">所属演练</span><span class="detail-value">'+esc(s?s.name:'未知')+' (v'+esc(exec.scenarioVersion)+')</span></div>'+
+      '<div class="detail-item"><span class="detail-label">状态</span><span class="detail-value"><span class="badge '+(statusBadge[exec.status]||'')+'">'+(REPLAY_EXECUTION_STATUS_LABELS[exec.status]||exec.status)+'</span></span></div>'+
+      '<div class="detail-item"><span class="detail-label">操作人</span><span class="detail-value">'+esc(exec.handler||'-')+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">开始时间</span><span class="detail-value">'+formatDateTime(exec.startedAt)+'</span></div>'+
+      '<div class="detail-item"><span class="detail-label">结束时间</span><span class="detail-value">'+formatDateTime(exec.finishedAt)+'</span></div>'+
+      (exec.note?'<div class="detail-item" style="grid-column:1/-1"><span class="detail-label">批次备注</span><span class="detail-value">'+esc(exec.note)+'</span></div>':'')+
+    '</div></div>'+subTabs+subContent;
+};
+
+UI._renderExecSummary=function(exec,s,statusBadge){
+  var summary=exec.resultSummary||{};
+  return '<div class="stats-grid">'+
+    '<div class="stat-card"><div class="stat-icon">📋</div><div class="stat-label">总步骤数</div><div class="stat-value">'+exec.totalSteps+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">✅</div><div class="stat-label">成功步骤</div><div class="stat-value" style="color:var(--success)">'+exec.completedSteps+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">❌</div><div class="stat-label">失败步骤</div><div class="stat-value" style="color:var(--danger)">'+exec.failedSteps+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">⚠️</div><div class="stat-label">跳过步骤</div><div class="stat-value" style="color:var(--warning)">'+exec.skippedSteps+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">🌱</div><div class="stat-label">种子工单</div><div class="stat-value">'+(summary.seedOrdersCount||0)+'</div></div>'+
+    '<div class="stat-card"><div class="stat-icon">⚡</div><div class="stat-label">完成时间</div><div class="stat-value" style="font-size:16px">'+(summary.completedAt?formatDateTime(summary.completedAt).split(' ')[1]:'-')+'</div></div>'+
+  '</div>';
+};
+
+UI._renderExecStepLogs=function(exec){
+  if(!exec.stepLogs||exec.stepLogs.length===0)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">📝</div><p>暂无步骤日志</p></div></div></div>';
+  var rows=exec.stepLogs.map(function(l){
+    var statusIcon=l.status==='success'?'✅':(l.status==='failed'?'❌':(l.status==='skipped'?'⚠️':'⏳'));
+    var badgeClass=l.status==='success'?'badge-completed':(l.status==='failed'?'badge-terminated':'badge-quoted');
+    return '<tr><td>步'+l.stepIndex+'</td><td>'+esc(l.stepName)+'</td>'+
+      '<td><span class="badge '+badgeClass+'">'+statusIcon+' '+(l.status==='success'?'成功':l.status==='failed'?'失败':'跳过')+'</span></td>'+
+      '<td>'+esc(l.detail||l.error||'')+'</td>'+
+      '<td>'+esc(l.note||'-')+'</td>'+
+      '<td>'+formatDateTime(l.finishedAt)+'</td>'+
+      '<td><button class="btn btn-sm btn-ghost" onclick="window.AppReplayShowRemarkModal(\''+exec.id+'\','+l.stepIndex+')">💬 备注</button></td></tr>';
+  }).join('');
+  return '<div class="card"><div class="card-body"><div class="table-wrap"><table>'+
+    '<thead><tr><th>序号</th><th>步骤</th><th>结果</th><th>详情</th><th>步骤备注</th><th>时间</th><th>操作</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderExecFailures=function(exec){
+  if(!exec.failureDetails||exec.failureDetails.length===0)return '<div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">✅</div><p>没有失败明细，所有步骤正常</p></div></div></div>';
+  var rows=exec.failureDetails.map(function(f){
+    return '<tr><td>步'+f.stepIndex+'</td><td>'+esc(f.stepName)+'</td><td style="color:var(--danger)">'+esc(f.error)+'</td><td>'+formatDateTime(f.timestamp)+'</td></tr>';
+  }).join('');
+  return '<div class="card" style="border-left:4px solid var(--danger)"><div class="card-body"><div class="table-wrap"><table>'+
+    '<thead><tr><th>步骤</th><th>名称</th><th>错误信息</th><th>时间</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderExecRemarks=function(exec){
+  var remarks=exec.operatorRemarks||[];
+  var addBtn='<button class="btn btn-sm btn-primary" onclick="window.AppReplayShowRemarkModal(\''+exec.id+'\',0)" style="margin-bottom:12px">+ 添加备注</button>';
+  if(remarks.length===0)return '<div class="card"><div class="card-body">'+addBtn+'<div class="empty-state"><div class="empty-icon">💬</div><p>暂无操作人备注</p></div></div></div>';
+  var rows=remarks.map(function(r){
+    return '<tr><td>'+esc(r.content)+'</td><td>'+(r.stepIndex===0?'全体':'步'+r.stepIndex)+'</td><td>'+esc(r.handler||'-')+'</td><td>'+formatDateTime(r.timestamp)+'</td></tr>';
+  }).join('');
+  return '<div class="card"><div class="card-body">'+addBtn+'<div class="table-wrap"><table>'+
+    '<thead><tr><th>内容</th><th>关联步骤</th><th>操作人</th><th>时间</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table></div></div></div>';
+};
+
+UI._renderExecSnapshots=function(exec){
+  var before=exec.snapshots&&exec.snapshots.before;
+  var after=exec.snapshots&&exec.snapshots.after;
+  function snapCard(title,snap,cls){
+    if(!snap)return '';
+    return '<div class="card '+cls+'" style="margin-bottom:16px"><div class="card-body"><h5>'+title+' ('+formatDateTime(snap.timestamp)+')</h5>'+
+      '<div class="detail-grid">'+
+        '<div class="detail-item"><span class="detail-label">工单</span><span class="detail-value">'+(snap.orders?snap.orders.length:0)+' 条</span></div>'+
+        '<div class="detail-item"><span class="detail-label">报价</span><span class="detail-value">'+(snap.quotes?snap.quotes.length:0)+' 条</span></div>'+
+        '<div class="detail-item"><span class="detail-label">历史</span><span class="detail-value">'+(snap.history?snap.history.length:0)+' 条</span></div>'+
+        '<div class="detail-item"><span class="detail-label">撤回</span><span class="detail-value">'+(snap.rollbacks?snap.rollbacks.length:0)+' 条</span></div>'+
+        '<div class="detail-item"><span class="detail-label">终止</span><span class="detail-value">'+(snap.terminations?snap.terminations.length:0)+' 条</span></div>'+
+      '</div></div></div>';
+  }
+  return snapCard('📸 执行前快照（撤销用）',before,'')+snapCard('📸 执行后快照',after,'');
+};
+
+UI._saveReplayState=function(){
+  ReplayStateManager.save({
+    currentTab:UI._replayCurrentTab,
+    filters:UI._replayFilters,
+    selectedScenarioId:UI._replaySelectedScenarioId,
+    selectedExecutionId:UI._replaySelectedExecutionId,
+    detailSubTab:UI._replayDetailSubTab,
+    currentDraftId:UI._replayCurrentDraftId,
+    compareIds:_replayCompareIds
+  });
+  ReplayStateManager.saveDetailView({subTab:UI._replayDetailSubTab});
+};
+
+UI._applyReplayFilters=function(){
+  var el=document.getElementById('replay-content');
+  if(el)el.innerHTML=this._renderReplayScenariosList();
+};
+
+function replaySwitchTab(tab){
+  UI._replayCurrentTab=tab;
+  if(tab==='scenarios'){UI._replaySelectedScenarioId=null;UI._replaySelectedExecutionId=null;}
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayViewDetail(sid){
+  UI._replayCurrentTab='detail';
+  UI._replaySelectedScenarioId=sid;
+  UI._replayDetailSubTab='info';
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayBackToList(){
+  UI._replayCurrentTab='scenarios';
+  UI._replaySelectedScenarioId=null;
+  UI._replaySelectedExecutionId=null;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayDetailSubTab(st){
+  UI._replayDetailSubTab=st;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayExecSubTab(st){
+  UI._replayDetailSubTab=st;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayFilterChange(){
+  UI._replayFilters={
+    status:document.getElementById('replay-filter-status').value,
+    keyword:document.getElementById('replay-filter-keyword').value.trim(),
+    createdBy:document.getElementById('replay-filter-creator').value.trim()
+  };
+  UI._saveReplayState();
+  UI._applyReplayFilters();
+}
+
+function replayClearFilters(){
+  UI._replayFilters={status:'',keyword:'',createdBy:''};
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayClearRestore(){
+  var s=ReplayStateManager.load();
+  if(s){delete s.selectedScenarioId;ReplayStateManager.save(s);}
+  renderReplayStage();
+}
+
+function replayShowNewModal(){
+  if(!ReplayPermission.canCreate()){showToast(ReplayPermission.getBlockMsg('canCreateScenario'),'error');return;}
+  var bodyHtml='<div class="form-group"><label>演练名称 *</label><input type="text" id="rp-new-name" placeholder="如：标准维修全流程演练"></div>'+
+    '<div class="form-group"><label>描述</label><textarea id="rp-new-desc" placeholder="描述演练的业务场景..."></textarea></div>'+
+    '<div class="form-row"><div class="form-group"><label>版本号</label><input type="text" id="rp-new-version" value="1.0.0"></div>'+
+    '<div class="form-group"><label>初始状态</label><select id="rp-new-status">'+
+      '<option value="'+REPLAY_SCENARIO_STATUS.DRAFT+'">草稿</option>'+
+      '<option value="'+REPLAY_SCENARIO_STATUS.PUBLISHED+'">已发布</option>'+
+    '</select></div></div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-primary" onclick="window.AppReplayCreateNew()">创建并编辑</button>';
+  showModal('新建演练',bodyHtml,footerHtml);
+}
+
+function replayCreateNew(){
+  var name=document.getElementById('rp-new-name').value.trim();
+  var desc=document.getElementById('rp-new-desc').value.trim();
+  var version=document.getElementById('rp-new-version').value.trim()||'1.0.0';
+  var status=document.getElementById('rp-new-status').value;
+  if(!name){showToast('请填写演练名称','error');return;}
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  var r=ScenarioEngine.create({name:name,description:desc,version:version,status:status,steps:[],seedOrders:[],tags:[]},handler);
+  if(!r.ok){showToast(r.msg,'error');return;}
+  closeModal();
+  showToast('演练创建成功：'+r.scenario.name,'success');
+  UI._replayCurrentTab='editor';
+  UI._replaySelectedScenarioId=r.scenario.id;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayEditScenario(sid){
+  UI._replayCurrentTab='editor';
+  UI._replaySelectedScenarioId=sid;
+  UI._replayCurrentDraftId=null;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayPublish(sid){
+  if(!confirm('确认将此演练状态改为「已发布」？'))return;
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  var r=ScenarioEngine.publish(sid,handler);
+  if(r.ok)showToast('演练已发布','success');
+  else showToast(r.msg,'error');
+  renderReplayStage();
+}
+
+function replayDeleteScenario(sid){
+  if(!confirm('确认删除此演练？所有执行记录也将被删除，此操作不可恢复！'))return;
+  var r=ScenarioEngine.remove(sid);
+  if(r.ok){showToast('演练已删除','success');UI._replaySelectedScenarioId=null;UI._saveReplayState();}
+  else showToast(r.msg,'error');
+  renderReplayStage();
+}
+
+function replayDeleteDraft(did){
+  if(!confirm('确认删除此草稿？'))return;
+  var r=DraftEngine.remove(did);
+  if(r.ok)showToast('草稿已删除','success');
+  else showToast(r.msg,'error');
+  renderReplayStage();
+}
+
+function replayOpenDraft(did){
+  UI._replayCurrentTab='editor';
+  UI._replayCurrentDraftId=did;
+  UI._replaySelectedScenarioId=null;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayPublishDraft(did){
+  if(!confirm('确认将此草稿发布为正式演练？发布后草稿将被删除。'))return;
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  var r=DraftEngine.publishDraft(did,handler);
+  if(r.ok){showToast('草稿已发布为正式演练：'+r.scenario.name,'success');UI._replayCurrentDraftId=null;UI._saveReplayState();}
+  else showToast(r.msg,'error');
+  renderReplayStage();
+}
+
+function replaySaveEditor(){
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  var seedOrders=[];
+  document.querySelectorAll('#rp-seed-orders > .card').forEach(function(card){
+    var inputs=card.querySelectorAll('input,select,textarea');
+    var obj={};
+    inputs.forEach(function(inp){
+      if(inp.classList.contains('rp-seed-name'))obj.customerName=inp.value;
+      if(inp.classList.contains('rp-seed-phone'))obj.customerPhone=inp.value;
+      if(inp.classList.contains('rp-seed-type'))obj.deviceType=inp.value;
+      if(inp.classList.contains('rp-seed-brand'))obj.deviceBrand=inp.value;
+      if(inp.classList.contains('rp-seed-model'))obj.deviceModel=inp.value;
+      if(inp.classList.contains('rp-seed-status'))obj.currentStatus=inp.value;
+      if(inp.classList.contains('rp-seed-fault'))obj.faultDescription=inp.value;
+    });
+    if(obj.customerName||obj.faultDescription)seedOrders.push(obj);
+  });
+  var steps=[];
+  document.querySelectorAll('#rp-steps > .card').forEach(function(card,idx){
+    var typeSel=card.querySelector('.rp-step-type');
+    var noteInput=card.querySelector('.rp-step-note');
+    var step={id:'step-'+uuid(),type:typeSel?typeSel.value:REPLAY_STEP_TYPES.ADVANCE_ORDER,order:idx+1,note:noteInput?noteInput.value:''};
+    var orderSel=card.querySelector('.rp-sp-order');
+    if(orderSel)step.orderId=orderSel.value;
+    var targetSel=card.querySelector('.rp-sp-target');
+    if(targetSel)step.targetStatus=targetSel.value;
+    var reasonInp=card.querySelector('.rp-sp-reason');
+    if(reasonInp)step.reason=reasonInp.value;
+    if(step.type===REPLAY_STEP_TYPES.CREATE_ORDER){
+      var c=card.querySelector('.rp-sp-customer');
+      var t=card.querySelector('.rp-sp-type');
+      var b=card.querySelector('.rp-sp-brand');
+      var f=card.querySelector('.rp-sp-fault');
+      step.orderData={customerName:c?c.value:'演练客户',deviceType:t?t.value:'笔记本',deviceBrand:b?b.value:'演练品牌',faultDescription:f?f.value:'演练故障'};
+    }
+    steps.push(step);
+  });
+  var data={
+    name:document.getElementById('rp-name').value.trim(),
+    description:document.getElementById('rp-description').value.trim(),
+    version:document.getElementById('rp-version').value.trim()||'1.0.0',
+    tags:document.getElementById('rp-tags').value.split(',').map(function(s){return s.trim();}).filter(Boolean),
+    steps:steps,
+    seedData:{orders:seedOrders,quotes:[],history:[]}
+  };
+  if(!data.name){showToast('请填写演练名称','error');return;}
+  var r;
+  if(UI._replaySelectedScenarioId){
+    r=ScenarioEngine.update(UI._replaySelectedScenarioId,data,handler);
+  }else{
+    r=ScenarioEngine.create(data,handler);
+    if(r.ok)UI._replaySelectedScenarioId=r.scenario.id;
+  }
+  if(r.ok){
+    showToast('保存成功','success');
+    UI._replayCurrentTab='detail';
+    UI._replayCurrentDraftId=null;
+    UI._saveReplayState();
+    renderReplayStage();
+  }else{
+    showToast(r.msg,'error');
+  }
+}
+
+function replaySaveDraft(){
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  var name=document.getElementById('rp-name').value.trim()||'未命名草稿';
+  var version=document.getElementById('rp-version').value.trim()||'1.0.0';
+  var description=document.getElementById('rp-description').value.trim();
+  var tags=document.getElementById('rp-tags').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
+  var seedOrders=[];
+  document.querySelectorAll('#rp-seed-orders > .card').forEach(function(card){
+    var obj={};
+    card.querySelectorAll('input,select,textarea').forEach(function(inp){
+      if(inp.classList.contains('rp-seed-name'))obj.customerName=inp.value;
+      if(inp.classList.contains('rp-seed-phone'))obj.customerPhone=inp.value;
+      if(inp.classList.contains('rp-seed-type'))obj.deviceType=inp.value;
+      if(inp.classList.contains('rp-seed-brand'))obj.deviceBrand=inp.value;
+      if(inp.classList.contains('rp-seed-model'))obj.deviceModel=inp.value;
+      if(inp.classList.contains('rp-seed-status'))obj.currentStatus=inp.value;
+      if(inp.classList.contains('rp-seed-fault'))obj.faultDescription=inp.value;
+    });
+    seedOrders.push(obj);
+  });
+  var steps=[];
+  document.querySelectorAll('#rp-steps > .card').forEach(function(card,idx){
+    var typeSel=card.querySelector('.rp-step-type');
+    var noteInput=card.querySelector('.rp-step-note');
+    var step={id:'step-'+uuid(),type:typeSel?typeSel.value:REPLAY_STEP_TYPES.ADVANCE_ORDER,order:idx+1,note:noteInput?noteInput.value:''};
+    var orderSel=card.querySelector('.rp-sp-order');
+    if(orderSel)step.orderId=orderSel.value;
+    var targetSel=card.querySelector('.rp-sp-target');
+    if(targetSel)step.targetStatus=targetSel.value;
+    var reasonInp=card.querySelector('.rp-sp-reason');
+    if(reasonInp)step.reason=reasonInp.value;
+    if(step.type===REPLAY_STEP_TYPES.CREATE_ORDER){
+      var c=card.querySelector('.rp-sp-customer');
+      var t=card.querySelector('.rp-sp-type');
+      var b=card.querySelector('.rp-sp-brand');
+      var f=card.querySelector('.rp-sp-fault');
+      step.orderData={customerName:c?c.value:'',deviceType:t?t.value:'',deviceBrand:b?b.value:'',faultDescription:f?f.value:''};
+    }
+    steps.push(step);
+  });
+  var draftData={name:name,version:version,description:description,tags:tags,steps:steps,seedData:{orders:seedOrders,quotes:[],history:[]}};
+  if(UI._replayCurrentDraftId)draftData.id=UI._replayCurrentDraftId;
+  var r=DraftEngine.save(draftData,handler);
+  if(r.ok){
+    UI._replayCurrentDraftId=r.draft.id;
+    showToast('草稿已保存','success');
+    UI._saveReplayState();
+  }else{
+    showToast(r.msg,'error');
+  }
+}
+
+function replayPreviewSteps(){
+  showToast('步骤预览（控制台）','info');
+  console.log('预览演练步骤数：',document.querySelectorAll('#rp-steps > .card').length);
+}
+
+function replayAddSeedOrder(){
+  var container=document.getElementById('rp-seed-orders');
+  var card=document.createElement('div');
+  card.className='card';card.style.cssText='margin-bottom:8px;padding:12px;background:var(--bg)';
+  card.innerHTML='<div class="form-row-3">'+
+    '<div class="form-group"><label>客户姓名</label><input type="text" class="rp-seed-name" placeholder="客户姓名"></div>'+
+    '<div class="form-group"><label>联系电话</label><input type="text" class="rp-seed-phone" placeholder="13800000000"></div>'+
+    '<div class="form-group"><label>设备类型</label><input type="text" class="rp-seed-type" value="笔记本"></div>'+
+  '</div><div class="form-row-3">'+
+    '<div class="form-group"><label>品牌</label><input type="text" class="rp-seed-brand" placeholder="如联想"></div>'+
+    '<div class="form-group"><label>型号</label><input type="text" class="rp-seed-model" placeholder="如 ThinkPad"></div>'+
+    '<div class="form-group"><label>初始状态</label><select class="rp-seed-status">'+STATUS_FLOW.map(function(s){return '<option value="'+s+'">'+STATUS_LABELS[s]+'</option>'}).join('')+'</select></div>'+
+  '</div><div class="form-group"><label>故障描述</label><textarea class="rp-seed-fault" placeholder="描述故障..."></textarea></div>'+
+  '<button class="btn btn-sm btn-danger" onclick="this.parentElement.remove()">✕ 移除此工单</button>';
+  container.appendChild(card);
+}
+
+function replayAddStep(){
+  var container=document.getElementById('rp-steps');
+  var card=document.createElement('div');
+  card.className='card';card.style.cssText='margin-bottom:12px;padding:16px;background:var(--bg);border-left:4px solid var(--primary)';
+  var orderOpts='';var statusOpts='';
+  Store.getOrders().forEach(function(o){orderOpts+='<option value="'+o.id+'">'+o.orderNo+' ('+o.customerName+')</option>';});
+  STATUS_FLOW.forEach(function(s){statusOpts+='<option value="'+s+'">'+STATUS_LABELS[s]+'</option>';});
+  var stepOpts='';
+  Object.keys(REPLAY_STEP_TYPE_LABELS).forEach(function(k){stepOpts+='<option value="'+k+'">'+REPLAY_STEP_TYPE_LABELS[k]+'</option>';});
+  var idx=document.querySelectorAll('#rp-steps > .card').length+1;
+  card.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'+
+    '<strong style="min-width:60px">步骤 '+idx+'</strong>'+
+    '<select class="rp-step-type" onchange="window.AppReplayStepTypeChange(this)" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:var(--radius)">'+stepOpts+'</select>'+
+    '<button class="btn btn-sm btn-danger" onclick="this.closest(\'.card\').remove();window.AppReplayReindexSteps()">✕ 删除</button>'+
+  '</div><div class="rp-step-params">'+UI._renderStepParams({type:REPLAY_STEP_TYPES.CREATE_ORDER},orderOpts,statusOpts)+'</div>'+
+  '<div class="form-group" style="margin-top:8px"><label>步骤备注</label><input type="text" class="rp-step-note" placeholder="可选"></div>';
+  container.appendChild(card);
+}
+
+function replayReindexSteps(){
+  var cards=document.querySelectorAll('#rp-steps > .card');
+  cards.forEach(function(card,idx){
+    var strong=card.querySelector('strong');
+    if(strong)strong.textContent='步骤 '+(idx+1);
+  });
+}
+
+function replayStepTypeChange(sel){
+  var params=sel.closest('.card').querySelector('.rp-step-params');
+  if(!params)return;
+  var st={type:sel.value};
+  var orderOpts='';var statusOpts='';
+  Store.getOrders().forEach(function(o){orderOpts+='<option value="'+o.id+'">'+o.orderNo+' ('+o.customerName+')</option>';});
+  STATUS_FLOW.forEach(function(s){statusOpts+='<option value="'+s+'">'+STATUS_LABELS[s]+'</option>';});
+  params.innerHTML=UI._renderStepParams(st,orderOpts,statusOpts);
+}
+
+function replayShowExecuteModal(sid){
+  var s=ScenarioEngine.getById(sid);
+  if(!s)return;
+  if(!ReplayPermission.canExecute()){showToast(ReplayPermission.getBlockMsg('canExecuteScenario'),'error');return;}
+  var permCfg=PermissionManager.getConfig();
+  var handlers=(permCfg.handlers||[]).map(function(h){return '<option value="'+h+'">'+h+'</option>'}).join('');
+  var bodyHtml='<div class="alert alert-info">▶ 将执行演练 <strong>'+esc(s.name)+'</strong>（'+(s.steps?s.steps.length:0)+'个步骤），每次执行都会记录步骤日志、失败明细和前后快照。</div>'+
+    '<div class="form-row">'+
+      '<div class="form-group"><label>操作人 *</label><select id="rp-exec-handler">'+handlers+'</select></div>'+
+      '<div class="form-group"><label>批次备注</label><input type="text" id="rp-exec-note" placeholder="可选，如：回归测试V2"></div>'+
+    '</div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-success" onclick="window.AppReplayDoExecute(\''+sid+'\')">▶ 开始执行</button>';
+  showModal('执行演练',bodyHtml,footerHtml);
+}
+
+function replayDoExecute(sid){
+  var handler=document.getElementById('rp-exec-handler').value;
+  var note=document.getElementById('rp-exec-note').value.trim();
+  var cr=ScenarioExecutionEngine.createExecution(sid,handler,note);
+  if(!cr.ok){closeModal();showToast(cr.msg,'error');return;}
+  closeModal();
+  showToast('批次创建成功（'+cr.execution.batchNo+'），开始执行...','info');
+  var execId=cr.execution.id;
+  ScenarioExecutionEngine.execute(execId).then(function(r){
+    if(r.ok){
+      UI._replayCurrentTab='exec-detail';
+      UI._replaySelectedExecutionId=execId;
+      UI._replayDetailSubTab='summary';
+      UI._saveReplayState();
+      var total=r.execution.totalSteps;
+      var ok=r.execution.completedSteps;var fail=r.execution.failedSteps;
+      showToast('执行完成！成功'+ok+'/'+total+'，失败'+fail,'success');
+      renderReplayStage();
+    }else{
+      showToast('执行失败：'+r.msg,'error');
+    }
+  });
+}
+
+function replayViewExecDetail(eid){
+  UI._replayCurrentTab='exec-detail';
+  UI._replaySelectedExecutionId=eid;
+  UI._replayDetailSubTab='summary';
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayShowRollbackModal(eid){
+  var exec=ScenarioExecutionEngine.getExecutionById(eid);
+  if(!exec)return;
+  if(!ReplayPermission.canRollback()){showToast(ReplayPermission.getBlockMsg('canRollbackExecution'),'error');return;}
+  var permCfg=PermissionManager.getConfig();
+  var handlers=(permCfg.handlers||[]).map(function(h){return '<option value="'+h+'">'+h+'</option>'}).join('');
+  var bodyHtml='<div class="alert alert-warning">⚠️ 将撤销批次 <strong>'+exec.batchNo+'</strong> 的所有写入操作，恢复到执行前的快照状态。此操作对已成功的步骤会撤回数据变更。</div>'+
+    '<div class="form-row">'+
+      '<div class="form-group"><label>操作人 *</label><select id="rp-rb-handler">'+handlers+'</select></div>'+
+      '<div class="form-group"><label>撤销原因 *</label><input type="text" id="rp-rb-reason" placeholder="如：演练数据错误，回滚"></div>'+
+    '</div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-warning" onclick="window.AppReplayDoRollback(\''+eid+'\')">↩ 确认撤销</button>';
+  showModal('撤销执行批次',bodyHtml,footerHtml);
+}
+
+function replayDoRollback(eid){
+  var handler=document.getElementById('rp-rb-handler').value;
+  var reason=document.getElementById('rp-rb-reason').value.trim();
+  if(!reason){showToast('请填写撤销原因','error');return;}
+  ScenarioExecutionEngine.rollbackExecution(eid,handler,reason).then(function(r){
+    if(r.ok){closeModal();showToast('撤销成功，数据已恢复到执行前状态','success');renderReplayStage();}
+    else{closeModal();showToast('撤销失败：'+r.msg,'error');}
+  });
+}
+
+function replayShowRemarkModal(eid,stepIndex){
+  var permCfg=PermissionManager.getConfig();
+  var handlers=(permCfg.handlers||[]).map(function(h){return '<option value="'+h+'">'+h+'</option>'}).join('');
+  var bodyHtml='<div class="form-group"><label>关联步骤</label><input type="text" value="'+(stepIndex===0?'全体步骤':'步骤 '+stepIndex)+'" readonly></div>'+
+    '<div class="form-group"><label>操作人</label><select id="rp-rmk-handler">'+handlers+'</select></div>'+
+    '<div class="form-group"><label>备注内容 *</label><textarea id="rp-rmk-content" placeholder="输入备注信息..."></textarea></div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-primary" onclick="window.AppReplayDoRemark(\''+eid+'\','+stepIndex+')">保存备注</button>';
+  showModal('添加操作人备注',bodyHtml,footerHtml);
+}
+
+function replayDoRemark(eid,stepIndex){
+  var handler=document.getElementById('rp-rmk-handler').value;
+  var content=document.getElementById('rp-rmk-content').value.trim();
+  if(!content){showToast('请填写备注内容','error');return;}
+  var r=ScenarioExecutionEngine.addOperatorRemark(eid,stepIndex,content,handler);
+  if(r.ok){closeModal();showToast('备注已保存','success');renderReplayStage();}
+  else showToast(r.msg,'error');
+}
+
+function replayExportSingle(sid){
+  if(!ReplayPermission.canExport()){showToast(ReplayPermission.getBlockMsg('canExportPackage'),'error');return;}
+  var r=ScenarioPackageEngine.exportScenario(sid);
+  if(!r.ok){showToast(r.msg,'error');return;}
+  var s=ScenarioEngine.getById(sid);
+  var fname='replay-package-'+(s?s.name.replace(/[^\w\u4e00-\u9fa5]/g,'_'):'scenario')+'-'+formatDate(now()).replace(/-/g,'')+'.json';
+  downloadFile(JSON.stringify(r.package,null,2),fname,'application/json');
+  showToast('演练包已导出','success');
+}
+
+function replayExportBundle(){
+  if(!ReplayPermission.canExport()){showToast(ReplayPermission.getBlockMsg('canExportPackage'),'error');return;}
+  var sel=document.getElementById('rp-export-ids');
+  var ids=[];
+  for(var i=0;i<sel.options.length;i++){if(sel.options[i].selected)ids.push(sel.options[i].value);}
+  if(ids.length===0){showToast('请至少选择一个演练','error');return;}
+  var r=ScenarioPackageEngine.exportMultiple(ids);
+  if(!r.ok){showToast(r.msg,'error');return;}
+  var fname='replay-bundle-'+formatDate(now()).replace(/-/g,'')+'.json';
+  downloadFile(JSON.stringify(r.package,null,2),fname,'application/json');
+  showToast('已导出 '+ids.length+' 个演练','success');
+}
+
+function replayImportPreview(event){
+  var file=event.target.files[0];if(!file)return;
+  showToast('正在解析演练包...','info');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      _replayTmpImportData=JSON.parse(e.target.result);
+      var precheck=ScenarioPackageEngine.precheckImport(_replayTmpImportData);
+      _replayTmpPrecheck=precheck;
+      var statusClass=precheck.canImport?(precheck.needConfirm?'alert-warning':'alert-success'):'alert-error';
+      var conflictHtml='';
+      var gc=precheck.groupedConflicts||{};
+      Object.keys(REPLAY_CONFLICT_LABELS).forEach(function(ct){
+        var items=gc[ct]||[];
+        if(items.length===0)return;
+        var isBlocked=items[0].severity==='blocked';
+        var borderColor=isBlocked?'var(--danger)':(items[0].severity==='error'?'var(--warning)':'var(--info)');
+        conflictHtml+='<div class="card" style="margin-top:12px;border-left:4px solid '+borderColor+'"><div class="card-body">'+
+          '<h5>'+REPLAY_CONFLICT_LABELS[ct]+' ('+items.length+'条)'+(isBlocked?' <span class="badge badge-terminated">已拦截</span>':'')+'</h5>'+
+          '<div class="table-wrap"><table>'+
+            '<thead><tr><th>项目</th><th>说明</th></tr></thead><tbody>'+
+            items.map(function(c){return '<tr><td>'+esc(c.itemName||c.itemId||'-')+'</td><td style="color:'+(isBlocked?'var(--danger)':'var(--text-primary)')+'">'+esc(c.message)+'</td></tr>';}).join('')+
+          '</tbody></table></div></div></div>';
+      });
+      document.getElementById('rp-import-preview').innerHTML=
+        '<div class="alert '+statusClass+'" style="margin-top:12px">'+
+          '<strong>预检结果：</strong>共 '+precheck.stats.totalScenarios+' 个演练，有效 '+precheck.stats.validScenarios+' 个，重复 '+precheck.stats.duplicateScenarios+' 个，缺字段 '+precheck.stats.missingFields+' 个'+
+          (precheck.needConfirm?' <br>⚠️ <strong>存在需要确认覆盖的冲突项</strong>，请选择是否覆盖':'')+
+          (!precheck.canImport?' <br>❌ <strong>无法导入，请解决上述问题</strong>':'')+
+        '</div>'+
+        '<div class="detail-grid" style="margin-top:8px">'+
+          '<div class="detail-item"><span class="detail-label">包版本</span><span class="detail-value">v'+esc(_replayTmpImportData.formatVersion||'-')+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">包格式</span><span class="detail-value">'+esc(_replayTmpImportData.exportFormat||'-')+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">导出时间</span><span class="detail-value">'+formatDateTime(_replayTmpImportData.exportedAt)+'</span></div>'+
+          '<div class="detail-item"><span class="detail-label">执行记录</span><span class="detail-value">'+precheck.stats.executionsInPackage+' 条</span></div>'+
+        '</div>'+conflictHtml;
+      if(precheck.canImport)document.getElementById('rp-import-actions').style.display='block';
+      else document.getElementById('rp-import-actions').style.display='none';
+      showToast('预检完成','success');
+    }catch(err){
+      _replayTmpImportData=null;_replayTmpPrecheck=null;
+      document.getElementById('rp-import-preview').innerHTML='<div class="alert alert-error" style="margin-top:12px">❌ 解析失败：'+esc(err.message)+'</div>';
+      document.getElementById('rp-import-actions').style.display='none';
+      showToast('解析失败：'+err.message,'error');
+    }
+  };
+  reader.readAsText(file);event.target.value='';
+}
+
+function replayConfirmImport(confirmOverwrite){
+  if(!_replayTmpImportData||!_replayTmpPrecheck){showToast('请先选择导入文件','error');return;}
+  if(_replayTmpPrecheck.needConfirm&&!confirmOverwrite){showToast('存在需要确认覆盖的冲突，请选择是否覆盖','warning');}
+  var permCfg=PermissionManager.getConfig();
+  var handler=(permCfg.handlers&&permCfg.handlers[0])||'系统';
+  ScenarioPackageEngine.doImport(_replayTmpImportData,_replayTmpPrecheck,{confirmOverwrite:confirmOverwrite},handler).then(function(r){
+    if(r.ok){
+      var sm=r.summary;
+      var msg='导入完成！成功 '+sm.importedScenarios+' 个，跳过 '+sm.skippedScenarios+' 个，失败 '+sm.failedScenarios+' 个，关联执行 '+sm.importedExecutions+' 条';
+      showToast(msg,'success');
+      _replayTmpImportData=null;_replayTmpPrecheck=null;
+      UI._replayCurrentTab='scenarios';UI._saveReplayState();
+      renderReplayStage();
+    }else{
+      showToast('导入失败：'+r.msg,'error');
+    }
+  });
+}
+
+function replayCancelImport(){
+  _replayTmpImportData=null;_replayTmpPrecheck=null;
+  document.getElementById('rp-import-preview').innerHTML='';
+  document.getElementById('rp-import-actions').style.display='none';
+  showToast('已取消','info');
+}
+
+function replaySetCompare(which,val){
+  _replayCompareIds[which]=val||null;
+  UI._saveReplayState();
+  renderReplayStage();
+}
+
+function replayShowPermSwitch(){
+  var cfg=PermissionManager.getConfig();
+  var bodyHtml='<div class="form-group"><label>切换角色（用于权限验证）</label><select id="rp-perm-role">'+
+    Object.keys(cfg.roles).map(function(r){var lb={admin:'管理员',operator:'操作员',viewer:'只读用户'};return '<option value="'+r+'" '+(cfg.currentRole===r?'selected':'')+'>'+lb[r]+'</option>';}).join('')+
+  '</select></div><div class="alert alert-info" style="margin-top:8px">切换角色后将按对应权限显示可操作按钮，用于验证权限控制效果。</div>';
+  var footerHtml='<button class="btn" onclick="window.AppCloseModal()">取消</button><button class="btn btn-primary" onclick="window.AppReplayDoPermSwitch()">确认切换</button>';
+  showModal('切换当前角色',bodyHtml,footerHtml);
+}
+
+function replayDoPermSwitch(){
+  var role=document.getElementById('rp-perm-role').value;
+  if(PermissionManager.setCurrentRole(role)){closeModal();showToast('角色已切换为：'+role,'success');renderReplayStage();}
+  else showToast('切换失败','error');
+}
+
+window.AppReplaySwitchTab=replaySwitchTab;
+window.AppReplayViewDetail=replayViewDetail;
+window.AppReplayBackToList=replayBackToList;
+window.AppReplayDetailSubTab=replayDetailSubTab;
+window.AppReplayExecSubTab=replayExecSubTab;
+window.AppReplayFilterChange=replayFilterChange;
+window.AppReplayClearFilters=replayClearFilters;
+window.AppReplayClearRestore=replayClearRestore;
+window.AppReplayShowNewModal=replayShowNewModal;
+window.AppReplayCreateNew=replayCreateNew;
+window.AppReplayEditScenario=replayEditScenario;
+window.AppReplayPublish=replayPublish;
+window.AppReplayDeleteScenario=replayDeleteScenario;
+window.AppReplayDeleteDraft=replayDeleteDraft;
+window.AppReplayOpenDraft=replayOpenDraft;
+window.AppReplayPublishDraft=replayPublishDraft;
+window.AppReplaySaveEditor=replaySaveEditor;
+window.AppReplaySaveDraft=replaySaveDraft;
+window.AppReplayPreviewSteps=replayPreviewSteps;
+window.AppReplayAddSeedOrder=replayAddSeedOrder;
+window.AppReplayAddStep=replayAddStep;
+window.AppReplayReindexSteps=replayReindexSteps;
+window.AppReplayStepTypeChange=replayStepTypeChange;
+window.AppReplayShowExecuteModal=replayShowExecuteModal;
+window.AppReplayDoExecute=replayDoExecute;
+window.AppReplayViewExecDetail=replayViewExecDetail;
+window.AppReplayShowRollbackModal=replayShowRollbackModal;
+window.AppReplayDoRollback=replayDoRollback;
+window.AppReplayShowRemarkModal=replayShowRemarkModal;
+window.AppReplayDoRemark=replayDoRemark;
+window.AppReplayExportSingle=replayExportSingle;
+window.AppReplayExportBundle=replayExportBundle;
+window.AppReplayImportPreview=replayImportPreview;
+window.AppReplayConfirmImport=replayConfirmImport;
+window.AppReplayCancelImport=replayCancelImport;
+window.AppReplaySetCompare=replaySetCompare;
+window.AppReplayShowPermSwitch=replayShowPermSwitch;
+window.AppReplayDoPermSwitch=replayDoPermSwitch;
+
+window.CRP={STATUS:STATUS,STATUS_LABELS:STATUS_LABELS,STORAGE_KEYS:STORAGE_KEYS,Store:Store,QuoteEngine:QuoteEngine,StatusEngine:StatusEngine,Validator:Validator,PermissionManager:PermissionManager,ImportAuditEngine:ImportAuditEngine,renderQuoteTable:renderQuoteTable,now:now,uuid:uuid,SampleData:SampleData,ReplayPermission:ReplayPermission,ScenarioEngine:ScenarioEngine,DraftEngine:DraftEngine,ScenarioExecutionEngine:ScenarioExecutionEngine,ScenarioPackageEngine:ScenarioPackageEngine,ScenarioDiffEngine:ScenarioDiffEngine,ReplayStateManager:ReplayStateManager,REPLAY_SCENARIO_STATUS:REPLAY_SCENARIO_STATUS,REPLAY_EXECUTION_STATUS:REPLAY_EXECUTION_STATUS,REPLAY_STEP_TYPES:REPLAY_STEP_TYPES,REPLAY_CONFLICT_TYPES:REPLAY_CONFLICT_TYPES,REPLAY_PACKAGE_FORMAT:REPLAY_PACKAGE_FORMAT,REPLAY_PACKAGE_VERSION:REPLAY_PACKAGE_VERSION};
 
 document.addEventListener('DOMContentLoaded',function(){
   SampleData.initialize();
