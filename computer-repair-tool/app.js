@@ -214,6 +214,12 @@ var QuoteEngine={
     if(order.currentStatus===STATUS.INSPECTING){
       var ar=StatusEngine.advance(orderId,STATUS.QUOTED,handler||'','生成报价（版本'+version+'）');
       if(!ar.ok)return ar;
+    }else if(order.currentStatus===STATUS.QUOTED){
+      var orders2=Store.getOrders();var order2=orders2.find(function(o){return o.id===orderId});
+      if(order2){order2.updatedAt=now();Store.saveOrders(orders2)}
+      var hs=Store.getHistory();
+      hs.push({id:uuid(),orderId:orderId,fromStatus:STATUS.QUOTED,toStatus:STATUS.QUOTED,handler:handler||'',note:'更新报价（版本'+version+'）',timestamp:now(),type:'advance'});
+      Store.saveHistory(hs);
     }
     return{ok:true,quote:quote};
   }

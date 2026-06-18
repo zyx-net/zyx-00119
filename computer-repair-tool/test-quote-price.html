@@ -175,6 +175,10 @@ function runAllTests(){
     results.push(tc06_multiVersionIndependent());
     results.push(tc07_doQuoteUsesLatest());
     results.push(tc08_detailRenderCorrect());
+    results.push(tc09_historyHasV2());
+    results.push(tc10_v1HistoryNotTouched());
+    results.push(tc11_historyPersistsAfterRefresh());
+    results.push(tc12_v3HistoryAlsoWritten());
   } catch(e){
     log('❌ 测试执行异常: ' + e.message, 'err');
   }
@@ -365,6 +369,98 @@ function tc08_detailRenderCorrect(){
   assertEq(v1Has399, false, '版本1渲染不包含新价¥399');
   
   return {name: 'TC08: 详情页渲染使用快照', pass: true};
+}
+
+function tc09_historyHasV2(){
+  log('\n🧪 TC09: 验证生成版本2后，操作历史追加了版本2记录');
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+  
+  var v1Record = history.find(function(h){ return h.note && h.note.indexOf('版本1') > -1; });
+  var v2Record = history.find(function(h){ return h.note && h.note.indexOf('版本2') > -1; });
+  
+  if(!v1Record) throw new Error('未找到版本1的历史记录');
+  if(!v2Record) throw new Error('未找到版本2的历史记录（这就是Bug！）');
+  
+  log('  ✅ 找到版本1记录: ' + v1Record.note);
+  log('  ✅ 找到版本2记录: ' + v2Record.note);
+  
+  assertEq(v1Record.toStatus, STATUS.QUOTED, '版本1的toStatus是QUOTED');
+  assertEq(v2Record.fromStatus, STATUS.QUOTED, '版本2的fromStatus是QUOTED');
+  assertEq(v2Record.toStatus, STATUS.QUOTED, '版本2的toStatus也是QUOTED');
+  assertEq(v2Record.type, 'advance', '版本2类型是advance');
+  
+  var noteHasV2 = v2Record.note.indexOf('版本2') > -1;
+  assertEq(noteHasV2, true, '版本2备注中包含版本号');
+  
+  return {name: 'TC09: 历史追加版本2记录', pass: true};
+}
+
+function tc10_v1HistoryNotTouched(){
+  log('\n🧪 TC10: 验证版本1历史记录未被串改');
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+  
+  var v1Record = history.find(function(h){ return h.note && h.note.indexOf('版本1') > -1; });
+  if(!v1Record) throw new Error('未找到版本1历史');
+  
+  assertEq(v1Record.fromStatus, STATUS.INSPECTING, '版本1 fromStatus仍为INSPECTING');
+  assertEq(v1Record.toStatus, STATUS.QUOTED, '版本1 toStatus仍为QUOTED');
+  
+  var v1Quotes = Store.getQuotesByOrderId('to1').sort(function(a,b){return a.version-b.version});
+  assertEq(v1Quotes[0].totalCost, 250, '版本1报价仍为250');
+  
+  return {name: 'TC10: 版本1历史和报价未被串改', pass: true};
+}
+
+function tc11_historyPersistsAfterRefresh(){
+  log('\n🧪 TC11: 验证刷新/重开后历史记录仍存在');
+  var rawHistory = JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY) || '[]');
+  var v2InStorage = rawHistory.find(function(h){ return h.orderId === 'to1' && h.note && h.note.indexOf('版本2') > -1; });
+  
+  if(!v2InStorage) throw new Error('localStorage中没有版本2的历史记录，刷新后会丢失！');
+  
+  var storeRead = Store.getHistoryByOrderId('to1').find(function(h){ return h.note && h.note.indexOf('版本2') > -1; });
+  assertEq(!!storeRead, true, 'Store读取的版本2历史存在');
+  assertEq(v2InStorage.note, storeRead.note, 'localStorage与Store读取一致');
+  assertEq(v2InStorage.type, 'advance', '存储的类型正确');
+  
+  return {name: 'TC11: 刷新/重开后历史持久化', pass: true};
+}
+
+function tc12_v3HistoryAlsoWritten(){
+  log('\n🧪 TC12: 生成版本3，验证第N次报价都能正确追加历史');
+  
+  var allParts = Store.getParts();
+  var allLabor = Store.getLabor();
+  var curPart = allParts.find(function(p){ return p.id === 'tp2'; });
+  var curLabor = allLabor.find(function(l){ return l.id === 'tl2'; });
+  
+  var parts = [
+    {partId:'tp2', partName:curPart.name, unitPrice:curPart.unitPrice, quantity:1, subtotal:curPart.unitPrice}
+  ];
+  var laborItems = [
+    {laborItemId:'tl2', laborName:curLabor.name, fee:curLabor.fee}
+  ];
+  
+  var result = QuoteEngine.generate('to1', parts, laborItems, '测试员');
+  if(!result.ok) throw new Error('生成版本3失败: ' + result.msg);
+  assertEq(result.quote.version, 3, '版本号为3');
+  
+  var history = Store.getHistoryByOrderId('to1').sort(function(a,b){ return new Date(a.timestamp) - new Date(b.timestamp); });
+  var v3Record = history.find(function(h){ return h.note && h.note.indexOf('版本3') > -1; });
+  
+  if(!v3Record) throw new Error('未找到版本3的历史记录！');
+  
+  log('  ✅ 找到版本3记录: ' + v3Record.note);
+  assertEq(v3Record.fromStatus, STATUS.QUOTED, '版本3 fromStatus为QUOTED');
+  assertEq(v3Record.toStatus, STATUS.QUOTED, '版本3 toStatus为QUOTED');
+  assertEq(v3Record.type, 'advance', '版本3类型正确');
+  
+  var allQuotes = Store.getQuotesByOrderId('to1').sort(function(a,b){ return a.version - b.version; });
+  assertEq(allQuotes.length, 3, '共有3个报价版本');
+  assertEq(allQuotes[0].totalCost, 250, '版本1仍为¥250');
+  assertEq(allQuotes[1].totalCost, 878, '版本2仍为¥878');
+  
+  return {name: 'TC12: 第N次报价都追加历史', pass: true};
 }
 
 function renderResults(results){

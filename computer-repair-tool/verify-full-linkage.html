@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>完整链路验证 - 报价改价+历史记录</title>
+<style>
+body{font-family:"Microsoft YaHei",arial,sans-serif;padding:24px;max-width:1100px;margin:0 auto;background:#f0f4f8;color:#333;line-height:1.7}
+h1{font-size:22px;color:#1a1a2e;border-bottom:3px solid #4f6ef7;padding-bottom:10px}
+h2{font-size:17px;color:#1e293b;margin-top:24px}
+.evidence{background:#fff;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.pass{background:#d1fae5;color:#065f46;font-weight:700;padding:4px 10px;border-radius:4px;display:inline-block}
+.fail{background:#fee2e2;color:#991b1b;font-weight:700;padding:4px 10px;border-radius:4px;display:inline-block}
+.data-row{display:grid;grid-template-columns:180px 1fr 1fr 100px;gap:8px;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:13px}
+.data-row.header{background:#f8fafc;font-weight:600;border-bottom:2px solid #cbd5e1}
+.data-row .item{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.log{background:#0f172a;color:#4ade80;padding:14px;border-radius:8px;font-family:Consolas,monospace;font-size:12px;margin-top:10px;max-height:320px;overflow:auto;line-height:1.9}
+.log .e{color:#f87171}
+.log .w{color:#fbbf24}
+.log .t{color:#60a5fa}
+.btn{padding:10px 22px;font-size:14px;cursor:pointer;border:none;border-radius:6px;background:#4f6ef7;color:#fff;font-weight:500}
+.btn.secondary{background:#64748b}
+.btn:hover{opacity:.9}
+.kbd{background:#e2e8f0;padding:2px 7px;border-radius:4px;font-family:Consolas,monospace;font-size:12px;color:#334155;border:1px solid #cbd5e1}
+.summary{padding:16px 20px;border-radius:10px;font-size:16px;font-weight:700;margin:16px 0;text-align:center}
+.summary.pass{background:#d1fae5;color:#065f46}
+.summary.fail{background:#fee2e2;color:#991b1b}
+code{background:#e2e8f0;padding:2px 6px;border-radius:3px;font-family:Consolas,monospace;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>🔬 完整链路验证报告 · 报价改价 + 操作历史</h1>
+<p>本页面直接调用 <code>app.js</code> 的 Store / QuoteEngine / StatusEngine，端到端验证完整数据流。</p>
+
+<div style="margin:16px 0;display:flex;gap:10px;flex-wrap:wrap">
+  <button class="btn" onclick="runFullVerification()">▶ 开始完整链路验证</button>
+  <button class="btn secondary" onclick="location.reload()">🔄 重置</button>
+  <button class="btn secondary" onclick="Object.keys(localStorage).filter(k=>k.startsWith('crp_test')).forEach(k=>localStorage.removeItem(k)); log('🧹 测试命名空间已清空','w')">🗑 清测试数据</button>
+</div>
+
+<div id="summary-box"></div>
+
+<h2>📌 根因定位</h2>
+<div class="evidence">
+  <p><strong>Bug：</strong>同一工单二次报价时，操作历史没有追加"版本2"记录。</p>
+  <p><strong>根因：</strong>[QuoteEngine.generate L214](file:///d:/workSpace/AI__SPACE/zyx-00119/computer-repair-tool/app.js#L214-L217) 只有当 <code>order.currentStatus === INSPECTING</code>（首次报价）才会走 <code>StatusEngine.advance()</code> 写历史；已是 <code>QUOTED</code> 状态时，整个分支被 <code>if</code> 跳过，没有写历史。</p>
+  <p><strong>修复（L217-L223，最小改动）：</strong>新增 <code>else if (currentStatus === QUOTED)</code> 分支，手动追加一条历史记录（状态 QUOTED→QUOTED，备注"更新报价（版本N）"），同时刷新工单 <code>updatedAt</code>。</p>
+</div>
+
+<h2>🧪 验证项目（12项）</h2>
+<div id="evidence-data"></div>
+
+<h2>📝 执行日志</h2>
+<div id="log-box" class="log"></div>
+
+<script src="app.js"></script>
+<script>
+var TP='crp_test_';var OK={};
+function log(m,c){var t=new Date().toLocaleTimeString();var x=c?' class="'+c+'"':'';document.getElementById('log-box').innerHTML+='<span'+x+'>['+t+'] '+m+'</span>\n';document.getElementById('log-box').scrollTop=1e9}
+function swap(u){var K=['ORDERS','PARTS','LABOR','QUOTES','HISTORY','ROLLBACKS','TERMINATIONS','INITIALIZED'];K.forEach(function(k){if(u){OK[k]=STORAGE_KEYS[k];STORAGE_KEYS[k]=TP+k.toLowerCase()}else if(OK[k])STORAGE_KEYS[k]=OK[k]})}
+function setup(){swap(true);Object.values(STORAGE_KEYS).forEach(function(k){localStorage.removeItem(k)});var t='2026-06-18T09:00:00.000Z';Store.saveParts([{id:'tp1',name:'测试配件A',category:'测试',unitPrice:100,updatedAt:t},{id:'tp2',name:'测试配件B',category:'测试',unitPrice:289,updatedAt:t}]);Store.saveLabor([{id:'tl1',name:'测试工时X',category:'测试',fee:50,updatedAt:t},{id:'tl2',name:'测试工时Y',category:'测试',fee:200,updatedAt:t}]);Store.saveOrders([{id:'to1',orderNo:'TEST-001',customerName:'验证客户',customerPhone:'13800000000',deviceType:'笔记本',deviceBrand:'Dell',deviceModel:'X1',faultDescription:'测试',handler:'验证员',currentStatus:STATUS.INSPECTING,createdAt:t,updatedAt:t}]);Store.saveQuotes([]);Store.saveHistory([]);Store.saveRollbacks([]);Store.saveTerminations([]);Store.save(STORAGE_KEYS.INITIALIZED,'true');log('✅ 环境初始化: 1工单(INSPECTING) + 2配件 + 2工时','t')}
+function aEq(x,y,m){if(x!==y)throw new Error(m+' 期望='+y+' 实际='+x);log('  ✔ '+m+': <span style="color:#22c55e">'+x+'</span>')}
+function row(h,a,b,r){return '<div class="data-row"><div class="item">'+h+'</div><div class="item">'+a+'</div><div class="item">'+b+'</div><div class="item"><span class="'+(r?'pass':'fail')+'">'+(r?'通过':'失败')+'</span></div></div>'}
+
+function runFullVerification(){
+  log('🚀 ========== 开始完整链路验证 ==========','w');
+  setup();
+  var R=[],ev='<div class="data-row header"><div>验证项</div><div>预期</div><div>实际</div><div>结果</div></div>';
+  
+  try{
+    // ===== Step 1: 生成版本1（状态 INSPECTING → QUOTED，应该写历史）=====
+    log('\n🔹 Step1: 生成版本1报价（配件A×2 + 工时X）','t');
+    var r1=QuoteEngine.generate('to1',[{partId:'tp1',partName:'测试配件A',unitPrice:100,quantity:2,subtotal:200}],[{laborItemId:'tl1',laborName:'测试工时X',fee:50}],'验证员');
+    if(!r1.ok)throw new Error('V1失败:'+r1.msg);
+    aEq(r1.quote.version,1,'V1版本号');
+    aEq(r1.quote.totalCost,250,'V1总价(100×2+50)');
+    R.push({n:'V1: 版本号=1 & 总价¥250',a:'1 / ¥250',b:r1.quote.version+' / ¥'+r1.quote.totalCost,r:r1.quote.version===1&&r1.quote.totalCost===250});
+    
+    var h1=Store.getHistoryByOrderId('to1');
+    var hasH1=h1.some(function(x){return x.note&&x.note.indexOf('版本1')>-1});
+    aEq(hasH1,true,'V1历史记录存在');
+    aEq(h1[0].fromStatus,STATUS.INSPECTING,'V1历史from=INSPECTING');
+    aEq(h1[0].toStatus,STATUS.QUOTED,'V1历史to=QUOTED');
+    R.push({n:'V1: 历史含「生成报价(版本1)」',a:'from=INSPECTING to=QUOTED',b:'from='+h1[0].fromStatus+' to='+h1[0].toStatus,r:hasH1&&h1[0].toStatus===STATUS.QUOTED});
+    
+    var o1=Store.getOrderById('to1');
+    aEq(o1.currentStatus,STATUS.QUOTED,'V1后工单状态=QUOTED');
+    R.push({n:'V1: 工单状态=QUOTED',a:'QUOTED',b:o1.currentStatus,r:o1.currentStatus===STATUS.QUOTED});
+    
+    // ===== Step 2: 修改配置价格 =====
+    log('\n🔹 Step2: 修改配置价格（配件A 100→399，工时X 50→80）','t');
+    var ps=Store.getParts();var pi=ps.findIndex(function(p){return p.id==='tp1'});ps[pi].unitPrice=399;Store.saveParts(ps);
+    var ls=Store.getLabor();var li=ls.findIndex(function(l){return l.id==='tl1'});ls[li].fee=80;Store.saveLabor(ls);
+    aEq(Store.getPartById('tp1').unitPrice,399,'配件A新价=399');
+    aEq(Store.getLaborById('tl1').fee,80,'工时X新费=80');
+    
+    // ===== Step 3: 生成版本2（已是QUOTED，修复前无历史！）=====
+    log('\n🔹 Step3: 生成版本2（QUOTED状态，关键验证点！）','t');
+    var ps2=Store.getParts(),ls2=Store.getLabor();
+    var cp=ps2.find(function(p){return p.id==='tp1'}),cl=ls2.find(function(l){return l.id==='tl1'});
+    var r2=QuoteEngine.generate('to1',[{partId:'tp1',partName:cp.name,unitPrice:cp.unitPrice,quantity:2,subtotal:cp.unitPrice*2}],[{laborItemId:'tl1',laborName:cl.name,fee:cl.fee}],'验证员');
+    if(!r2.ok)throw new Error('V2失败:'+r2.msg);
+    aEq(r2.quote.version,2,'V2版本号');
+    aEq(r2.quote.parts[0].unitPrice,399,'V2配件A用新价399');
+    aEq(r2.quote.laborItems[0].fee,80,'V2工时X用新费80');
+    aEq(r2.quote.totalCost,878,'V2总价(399×2+80)');
+    R.push({n:'V2: 新版本用新价 ¥878',a:'版本2 / ¥878',b:'版本'+r2.quote.version+' / ¥'+r2.quote.totalCost,r:r2.quote.version===2&&r2.quote.totalCost===878});
+    
+    // 关键！V2历史必须存在
+    var hAll=Store.getHistoryByOrderId('to1').sort(function(x,y){return new Date(x.timestamp)-new Date(y.timestamp)});
+    log('  📋 历史记录共 '+hAll.length+' 条:');hAll.forEach(function(h,i){log('     ['+i+'] '+h.fromStatus+'→'+h.toStatus+' | '+h.note)});
+    var hasH2=hAll.some(function(x){return x.note&&x.note.indexOf('版本2')>-1});
+    aEq(hasH2,true,'✅ 版本2历史记录存在（核心修复！）');
+    var h2Rec=hAll.find(function(x){return x.note&&x.note.indexOf('版本2')>-1});
+    aEq(h2Rec.fromStatus,STATUS.QUOTED,'V2历史from=QUOTED');
+    aEq(h2Rec.toStatus,STATUS.QUOTED,'V2历史to=QUOTED（同状态刷新）');
+    aEq(h2Rec.type,'advance','V2历史type=advance');
+    R.push({n:'⭐ 核心修复: V2历史存在「更新报价(版本2)」',a:'存在 / QUOTED→QUOTED',b:(hasH2?'存在':'缺失')+' / '+(h2Rec?h2Rec.fromStatus+'→'+h2Rec.toStatus:'-'),r:hasH2&&h2Rec.fromStatus===STATUS.QUOTED});
+    
+    // ===== Step 4: V1 不被串改 =====
+    log('\n🔹 Step4: 验证V1历史和金额未被串改','t');
+    var qs=Store.getQuotesByOrderId('to1').sort(function(x,y){return x.version-y.version});
+    aEq(qs.length,2,'报价版本数=2');
+    aEq(qs[0].totalCost,250,'V1总价仍¥250');
+    aEq(qs[0].parts[0].unitPrice,100,'V1配件单价仍¥100');
+    aEq(qs[1].totalCost,878,'V2总价仍¥878');
+    R.push({n:'V1金额不被串改',a:'¥250 / ¥100',b:'¥'+qs[0].totalCost+' / ¥'+qs[0].parts[0].unitPrice,r:qs[0].totalCost===250&&qs[0].parts[0].unitPrice===100});
+    
+    var h1Rec=hAll.find(function(x){return x.note&&x.note.indexOf('版本1')>-1});
+    aEq(h1Rec.fromStatus,STATUS.INSPECTING,'V1历史from仍INSPECTING');
+    R.push({n:'V1历史不被串改',a:'from=INSPECTING',b:'from='+h1Rec.fromStatus,r:h1Rec.fromStatus===STATUS.INSPECTING});
+    
+    // ===== Step 5: 刷新/重开一致性 =====
+    log('\n🔹 Step5: 刷新/重开后一致性（localStorage↔Store双向验证）','t');
+    var rawQ=JSON.parse(localStorage.getItem(STORAGE_KEYS.QUOTES));
+    var rawQ2=rawQ.find(function(q){return q.orderId==='to1'&&q.version===2});
+    var rawH=JSON.parse(localStorage.getItem(STORAGE_KEYS.HISTORY));
+    var rawH2=rawH.find(function(h){return h.orderId==='to1'&&h.note&&h.note.indexOf('版本2')>-1});
+    aEq(rawQ2.totalCost,878,'localStorage中V2总价=878');
+    aEq(!!rawH2,true,'localStorage中V2历史存在');
+    aEq(qs[1].totalCost,rawQ2.totalCost,'Store↔localStorage报价一致');
+    aEq(h2Rec.note,rawH2.note,'Store↔localStorage历史一致');
+    R.push({n:'刷新持久化: V2在localStorage中',a:'V2总价¥878 + V2历史存在',b:'V2总价¥'+rawQ2.totalCost+' V2历史'+(rawH2?'存在':'缺失'),r:rawQ2.totalCost===878&&!!rawH2});
+    
+    // ===== Step 6: 详情页渲染 =====
+    log('\n🔹 Step6: 详情页渲染正确性','t');
+    var v1Html=renderQuoteTable(qs[0]);
+    var v2Html=renderQuoteTable(qs[1]);
+    aEq(v1Html.indexOf('¥100.00')>-1,true,'V1渲染含原价¥100');
+    aEq(v1Html.indexOf('¥250.00')>-1,true,'V1渲染含原价总计¥250');
+    aEq(v2Html.indexOf('¥399.00')>-1,true,'V2渲染含新价¥399');
+    aEq(v2Html.indexOf('¥878.00')>-1,true,'V2渲染含新价总计¥878');
+    aEq(v1Html.indexOf('¥399.00')>-1,false,'V1渲染不含新价¥399');
+    R.push({n:'详情渲染: V1原价/V2新价',a:'¥100/¥250 & ¥399/¥878 正确分离',b:'V1含¥100¥250不含¥399 / V2含¥399¥878',r:v1Html.indexOf('¥100.00')>-1&&v1Html.indexOf('¥399.00')<0&&v2Html.indexOf('¥399.00')>-1});
+    
+    // ===== Step 7: 导出JSON =====
+    log('\n🔹 Step7: 导出JSON数据结构','t');
+    var expQ=Store.getQuotes().find(function(q){return q.orderId==='to1'&&q.version===2});
+    var expH=Store.getHistory().filter(function(h){return h.orderId==='to1'});
+    aEq(expQ.parts.length,1,'导出V2配件数');
+    aEq(expH.length,hAll.length,'导出历史条数匹配');
+    aEq(expH.some(function(h){return h.note&&h.note.indexOf('版本2')>-1}),true,'导出JSON含V2历史');
+    R.push({n:'导出JSON: 含V2报价和历史',a:'V2报价+V2历史都存在',b:'V2报价'+(expQ?'存在':'缺失')+' V2历史'+(expH.some(function(h){return h.note&&h.note.indexOf('版本2')>-1})?'存在':'缺失'),r:!!expQ&&expH.some(function(h){return h.note&&h.note.indexOf('版本2')>-1})});
+    
+    // ===== Step 8: 生成V3（第N次报价也要写历史）=====
+    log('\n🔹 Step8: 生成版本3（第N次报价也必须写历史）','t');
+    var r3=QuoteEngine.generate('to1',[{partId:'tp2',partName:'测试配件B',unitPrice:289,quantity:1,subtotal:289}],[{laborItemId:'tl2',laborName:'测试工时Y',fee:200}],'验证员');
+    aEq(r3.quote.version,3,'V3版本号');
+    var h3=Store.getHistoryByOrderId('to1');
+    var hasH3=h3.some(function(x){return x.note&&x.note.indexOf('版本3')>-1});
+    aEq(hasH3,true,'V3历史存在');
+    aEq(h3.length,3,'历史共3条（V1+V2+V3）');
+    R.push({n:'V3及第N次报价都追加历史',a:'3条版本历史都存在',b:h3.length+'条历史，V3'+(hasH3?'存在':'缺失'),r:hasH3&&h3.length===3});
+    
+  }catch(e){log('❌ 验证中断: '+e.message,'e');throw e}
+  
+  R.forEach(function(i){ev+=row(i.n,i.a,i.b,i.r)});
+  document.getElementById('evidence-data').innerHTML=ev;
+  
+  var pass=R.filter(function(x){return x.r}).length,fail=R.length-pass;
+  var sb=document.getElementById('summary-box');
+  if(fail===0){sb.innerHTML='<div class="summary pass">🎉 全部 '+R.length+' 项验证通过！修复正确，历史缺口已补上。</div>';log('\n🏆 ========== 全部 '+R.length+' 项验证通过 ==========','t')}
+  else{sb.innerHTML='<div class="summary fail">⚠️ '+fail+'/'+R.length+' 项失败</div>';log('\n⚠️ '+fail+' 项失败','e')}
+  
+  swap(false);
+  log('💡 已切回正式数据命名空间，测试数据不影响业务');
+}
+
+window.onload=function(){log('📋 验证器加载完成，点击「开始完整链路验证」。测试使用 crp_test_* 命名空间，独立于业务数据。')}
+</script>
+</body>
+</html>
